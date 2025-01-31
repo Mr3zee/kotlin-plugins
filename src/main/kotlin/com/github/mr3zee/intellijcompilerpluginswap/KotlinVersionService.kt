@@ -12,7 +12,7 @@ class KotlinVersionService {
             }?.trim() ?: error("Kotlin version file not found")
     }
 
-    fun getKotlinPluginVersion(): String {
+    fun getKotlinIdePluginVersion(): String {
         return version
     }
 }

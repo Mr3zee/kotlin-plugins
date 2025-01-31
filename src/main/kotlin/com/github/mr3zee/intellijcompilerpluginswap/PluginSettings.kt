@@ -14,13 +14,16 @@ import com.intellij.openapi.components.Storage
 class PluginSettingsService : SimplePersistentStateComponent<PluginSettings>(PluginSettings())
 
 class PluginSettings : BaseState() {
-    val plugins by list<PluginDescriptor>()
+    val plugins by treeSet<PluginDescriptor>()
 
     init {
-        plugins.add(PluginDescriptor.KotlinxRpc.CLI)
-        plugins.add(PluginDescriptor.KotlinxRpc.K2)
-        plugins.add(PluginDescriptor.KotlinxRpc.BACKEND)
-        plugins.add(PluginDescriptor.KotlinxRpc.COMMON)
+        if (plugins.add(PluginDescriptor.KotlinxRpc.CLI) or
+            plugins.add(PluginDescriptor.KotlinxRpc.K2) or
+            plugins.add(PluginDescriptor.KotlinxRpc.BACKEND) or
+            plugins.add(PluginDescriptor.KotlinxRpc.COMMON)
+        ) {
+            incrementModificationCount()
+        }
     }
 }
 
@@ -28,9 +31,16 @@ data class PluginDescriptor(
     val repoUrl: String,
     val groupId: String,
     val artifactId: String,
-) {
+) : Comparable<PluginDescriptor>, BaseState() {
+    override fun compareTo(other: PluginDescriptor): Int {
+        return id.compareTo(other.id)
+    }
+
+    override fun toString(): String {
+        return id
+    }
+
     val id get() = "$groupId:$artifactId"
-    val groupUrl get() = groupId.replace(".", "/")
 
     object KotlinxRpc {
         private fun kotlinxRpc(suffix: String) = PluginDescriptor(

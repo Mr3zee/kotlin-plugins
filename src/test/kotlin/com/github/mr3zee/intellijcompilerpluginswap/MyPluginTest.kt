@@ -7,11 +7,9 @@ import java.nio.file.Files
 
 class MyPluginTest : BasePlatformTestCase() {
     fun testKotlinVersion() {
-        assertNoThrowable {
-            val version = service<KotlinVersionService>().getKotlinPluginVersion()
-            assertTrue(version.isNotEmpty())
-            println(version)
-        }
+        val version = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        assertTrue(version.isNotEmpty())
+        println(version)
     }
 
     fun testManifestParsing() {
@@ -53,8 +51,9 @@ class MyPluginTest : BasePlatformTestCase() {
 
     fun testManifestDownload() = runBlocking {
         val versions = JarDownloader.downloadManifestAndGetVersions(
+            "[testManifestDownload]",
             "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin",
-        )
+        ) ?: return@runBlocking fail("Failed to download manifest")
 
         assertContainsElements(
             versions,
@@ -64,7 +63,7 @@ class MyPluginTest : BasePlatformTestCase() {
 
     fun testDownloadJar() = runBlocking {
         val tempFile = Files.createTempDirectory("testDownloadJar")
-        JarDownloader.downloadLatestIfNotExists(
+        val result = JarDownloader.downloadLatestIfNotExists(
             repoUrl = "https://maven.pkg.jetbrains.space/public/p/krpc/maven",
             groupId = "org.jetbrains.kotlinx",
             artifactId = "kotlinx-rpc-compiler-plugin",
@@ -75,6 +74,7 @@ class MyPluginTest : BasePlatformTestCase() {
         val jarFile = tempFile.toFile().listFiles()?.firstOrNull()
         assertNotNull(jarFile)
         assertTrue(jarFile!!.exists())
+        assertEquals(jarFile.toPath(), result)
     }
 
     fun testPluginPath() {
