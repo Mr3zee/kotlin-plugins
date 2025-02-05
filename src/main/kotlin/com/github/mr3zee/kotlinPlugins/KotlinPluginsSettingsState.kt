@@ -27,6 +27,11 @@ class KotlinPluginsSettingsState : BaseState() {
     }
 }
 
+data class KotlinPluginDescriptorVersioned(
+    val descriptor: KotlinPluginDescriptor,
+    val version: String?,
+)
+
 data class KotlinPluginDescriptor(
     val repoUrl: String,
     val groupId: String,

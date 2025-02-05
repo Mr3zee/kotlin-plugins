@@ -13,8 +13,6 @@ import com.intellij.platform.eel.provider.getEelApiBlocking
 import com.intellij.platform.eel.provider.utils.userHomeBlocking
 import com.intellij.platform.eel.toNioPath
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.nio.file.Files
 import java.nio.file.Path
@@ -22,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.Path
 import kotlin.io.path.listDirectoryEntries
+import kotlin.io.path.name
 
 const val KOTLIN_PLUGINS_STORAGE_DIRECTORY = ".kotlinPlugins"
 
@@ -123,13 +122,13 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
 
     private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, Path?>>()
 
-    fun getPluginPath(project: Project?, descriptor: KotlinPluginDescriptor): Path? {
+    fun getPluginPath(project: Project?, versioned: KotlinPluginDescriptorVersioned): Path? {
         val kotlinVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
         val map = pluginsCache.getOrPut(kotlinVersion) { ConcurrentHashMap() }
-        val path = map.compute(descriptor) { _, old ->
+        val path = map.compute(versioned.descriptor) { _, old ->
             if (old == null || !Files.exists(old)) {
-                findJarPath(descriptor, kotlinVersion)
+                findJarPath(versioned, kotlinVersion)
             } else {
                 old
             }
@@ -137,34 +136,42 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
 
         if (path == null) {
             // cache miss, but no other version is present
-            cacheMisses[descriptor] = false
+            cacheMisses[versioned.descriptor] = false
             actualizePlugins(project)
         } else {
-            cacheMisses.remove(descriptor)
+            cacheMisses.remove(versioned.descriptor)
         }
 
         return path
     }
 
     private fun findJarPath(
-        descriptor: KotlinPluginDescriptor,
+        versioned: KotlinPluginDescriptorVersioned,
         kotlinVersion: String,
     ): Path? {
         val basePath = cacheDirBlocking(null)
             ?.resolve(kotlinVersion)
-            ?.resolve(descriptor.getPluginGroupPath())
+            ?.resolve(versioned.descriptor.getPluginGroupPath())
             ?: return null
 
         if (!Files.exists(basePath)) {
             return null
         }
 
-        basePath.listDirectoryEntries("${descriptor.artifactId}-$kotlinVersion-*.jar").forEach {
-            // todo match exact
-            return it
+        val candidates = basePath
+            .listDirectoryEntries("${versioned.descriptor.artifactId}-$kotlinVersion-*.jar")
+            .toList()
+
+        if (versioned.version != null) {
+            candidates.find {
+                it.name.endsWith("-${versioned.version}-$FOR_IDE_CLASSIFIER.jar") ||
+                        it.name.endsWith("-${versioned.version}.jar")
+            }?.let { return it }
         }
 
-        return null
+        candidates.find { it.name.endsWith("-$FOR_IDE_CLASSIFIER.jar") }?.let { return it }
+
+        return candidates.firstOrNull()
     }
 
     @Suppress("UnstableApiUsage")

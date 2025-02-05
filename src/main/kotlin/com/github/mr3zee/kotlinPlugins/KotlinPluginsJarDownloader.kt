@@ -166,8 +166,9 @@ internal object KotlinPluginsJarDownloader {
         return parseManifestXmlToVersions(manifest)
     }
 
-    private const val FOR_IDE_CLASSIFIER = "for-ide"
 }
+
+const val FOR_IDE_CLASSIFIER = "for-ide"
 
 internal fun getLatestVersion(versions: List<String>, prefix: String): String? =
     versions.filter { it.startsWith(prefix) }.maxByOrNull { string ->
