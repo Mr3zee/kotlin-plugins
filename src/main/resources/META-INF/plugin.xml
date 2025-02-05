@@ -8,15 +8,12 @@
     <depends>org.jetbrains.kotlin</depends>
     <depends>com.intellij.gradle</depends>
 
-    <resource-bundle>messages.KotlinPluginsBundle</resource-bundle>
-
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <!--suppress PluginXmlValidity -->
         <bundledFirCompilerPluginProvider implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProvider"/>
         <supportsKotlinPluginMode supportsK1="false" supportsK2="true" />
     </extensions>
     <extensions defaultExtensionNs="com.intellij">
-        <postStartupActivity implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProjectAware$StartupActivity"/>
-        <externalIconProvider key="KOTLIN_PLUGINS" implementationClass="com.github.mr3zee.kotlinPlugins.KotlinPluginsExternalIconsProvider"/>
+        <postStartupActivity implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProjectsMap$StartupActivity"/>
     </extensions>
 </idea-plugin>

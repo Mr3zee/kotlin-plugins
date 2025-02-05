@@ -9,11 +9,11 @@ kotlin = "2.0.20"
 kover = "0.8.3"
 qodana = "2024.2.3"
 ktor = "3.0.3"
+jsoup = "1.18.1"
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
-ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
-ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 
 [plugins]
 changelog = { id = "org.jetbrains.changelog", version.ref = "changelog" }

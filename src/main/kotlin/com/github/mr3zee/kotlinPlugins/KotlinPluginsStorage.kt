@@ -46,18 +46,6 @@ class KotlinPluginsStorageService(
 
     private val cacheMisses = ConcurrentHashMap<KotlinPluginDescriptor, Boolean>()
 
-//    fun updateProjectAwareState(project: Project) {
-//        if (!compatible || !cacheMisses.values.any()) {
-//            return
-//        }
-//
-//        val projectAware = KotlinPluginsProjectAware.getInstance(project)
-//
-//        ExternalSystemProjectNotificationAware
-//            .getInstance(project)
-//            .notificationNotify(projectAware)
-//    }
-
     private val runningActualizeJob = AtomicReference<Job?>(null)
     private val pluginPathsLock = Mutex()
 
@@ -125,6 +113,10 @@ class KotlinPluginsStorageService(
 
                 if (cacheMisses.any { !it.value }) {
                     actualizePlugins()
+                } else {
+                    KotlinPluginsProjectsMap.instances.forEach { (project, _) ->
+                        invalidateKotlinPluginsCache(project)
+                    }
                 }
             }
 

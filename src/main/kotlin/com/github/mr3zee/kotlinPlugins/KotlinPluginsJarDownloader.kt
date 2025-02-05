@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.exists
 
-object KotlinPluginsJarDownloader {
+internal object KotlinPluginsJarDownloader {
     private val logger by lazy { KotlinPluginsJarDownloader.thisLogger() }
 
     private val client by lazy {
