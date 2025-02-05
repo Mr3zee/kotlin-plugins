@@ -13,7 +13,8 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
         logger.info("Request for plugin jar: $userSuppliedPluginJar")
         val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorOrNull() ?: return null
         logger.info("Found plugin descriptor: $descriptor")
-        return service<KotlinPluginsStorageService>().getPluginPath(descriptor).also {
+        // TODO pass project here
+        return service<KotlinPluginsStorageService>().getPluginPath(null, descriptor).also {
             logger.info("Returning plugin jar: $it")
         }
     }
