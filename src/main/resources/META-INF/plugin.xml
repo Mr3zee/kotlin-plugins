@@ -1,6 +1,6 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.mr3zee.intellijcompilerpluginswap</id>
+    <id>com.github.mr3zee.kotlinPlugins</id>
     <name>Kotlin Plugins</name>
     <vendor>Mr3zee</vendor>
     <category>Kotlin</category>
@@ -12,11 +12,11 @@
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <!--suppress PluginXmlValidity -->
-        <bundledFirCompilerPluginProvider implementation="com.github.mr3zee.intellijcompilerpluginswap.PluginProvider"/>
+        <bundledFirCompilerPluginProvider implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProvider"/>
         <supportsKotlinPluginMode supportsK1="false" supportsK2="true" />
     </extensions>
     <extensions defaultExtensionNs="com.intellij">
-        <postStartupActivity implementation="com.github.mr3zee.intellijcompilerpluginswap.KotlinPluginsProjectAware$StartupActivity"/>
-        <externalIconProvider key="KOTLIN_PLUGINS" implementationClass="com.github.mr3zee.intellijcompilerpluginswap.KotlinPluginsExternalIconsProvider"/>
+        <postStartupActivity implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProjectAware$StartupActivity"/>
+        <externalIconProvider key="KOTLIN_PLUGINS" implementationClass="com.github.mr3zee.kotlinPlugins.KotlinPluginsExternalIconsProvider"/>
     </extensions>
 </idea-plugin>

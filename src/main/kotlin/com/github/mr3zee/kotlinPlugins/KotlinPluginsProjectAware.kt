@@ -1,15 +1,11 @@
-package com.github.mr3zee.intellijcompilerpluginswap
+package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.service
 import com.intellij.openapi.externalSystem.autoimport.*
 import com.intellij.openapi.externalSystem.model.ProjectSystemId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
-import com.intellij.platform.diagnostic.telemetry.EDT
-import com.intellij.platform.runtime.loader.IntellijLoader.launch
-import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import org.jetbrains.kotlin.idea.configuration.GRADLE_SYSTEM_ID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -25,27 +21,23 @@ class KotlinPluginsProjectAware(val project: Project) : ExternalSystemProjectAwa
     )
 
     override fun reloadProject(context: ExternalSystemProjectReloadContext) {
-        val provider = KotlinCompilerPluginsProvider.getInstance(project)
-
-        if (provider is Disposable) {
-            provider.dispose() // clear Kotlin plugin caches
-            service<PluginStorageService>().clearCacheMisses()
-        }
+        invalidateKotlinPluginsCache(project)
 
         // todo check if can be done in a more efficient manner,
         //  for example runPartialGradleImport(project, root)
 
-        ExternalSystemProjectTracker
-            .getInstance(project)
-            .markDirty(gradleExternalSystemId)
-
-        @Suppress("UnstableApiUsage")
-        ProjectRefreshAction.Manager.refreshProject(project)
+//        ExternalSystemProjectTracker
+//            .getInstance(project)
+//            .markDirty(gradleExternalSystemId)
+//
+//        @Suppress("UnstableApiUsage")
+//        ProjectRefreshAction.Manager.refreshProject(project)
     }
 
     override fun subscribe(listener: ExternalSystemProjectListener, parentDisposable: Disposable) {}
     override val settingsFiles: Set<String> = emptySet()
 
+    // I copied this code from somewhere
     class StartupActivity : ProjectActivity {
         override suspend fun execute(project: Project) {
             if (ApplicationManager.getApplication().isUnitTestMode) {
@@ -57,8 +49,6 @@ class KotlinPluginsProjectAware(val project: Project) : ExternalSystemProjectAwa
             val projectTracker = ExternalSystemProjectTracker.getInstance(project)
             projectTracker.register(projectAware, object : Disposable.Default {})
             projectTracker.activate(projectAware.projectId)
-
-//            service<PluginStorageService>().actualizePlugins()
         }
     }
 

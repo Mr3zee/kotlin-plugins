@@ -1,4 +1,4 @@
-package com.github.mr3zee.intellijcompilerpluginswap
+package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.externalSystem.ui.ExternalSystemIconProvider
 import com.intellij.openapi.util.IconLoader

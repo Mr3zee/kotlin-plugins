@@ -1,11 +1,14 @@
-package com.github.mr3zee.intellijcompilerpluginswap
+package com.github.mr3zee.kotlinPlugins
 
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.*
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.io.File
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
@@ -14,34 +17,34 @@ import kotlin.properties.Delegates
 
 @Service
 @State(
-    name = "CompilerPluginsSwapStorage",
+    name = "KotlinPluginsStorage",
     storages = [
         Storage(
-            "${StoragePathMacros.CACHE_FILE}/kotlin-fir-compiler-plugins-swap-storage.xml",
+            "${StoragePathMacros.CACHE_FILE}/kotlin-plugins-storage.xml",
             roamingType = RoamingType.DISABLED,
         ),
     ]
 )
-class PluginStorageService(
+class KotlinPluginsStorageService(
     private val scope: CoroutineScope,
-) : SimplePersistentStateComponent<PluginStorage>(PluginStorage()) {
+) : SimplePersistentStateComponent<KotlinPluginsStorage>(KotlinPluginsStorage()) {
     private var cacheFolder: Path by Delegates.notNull()
     private val compatible: Boolean = SystemInfo.isLinux || SystemInfo.isWindows || SystemInfo.isMac
     private val logger by lazy { thisLogger() }
 
     init {
-        val folderName = "kotlin-fir-compiler-plugin-swap"
+        val folderName = ".kotlinPlugins"
         when {
-            SystemInfo.isLinux -> System.getenv("XDG_CACHE_HOME") ?: "~/.cache"
-            SystemInfo.isWindows ->  System.getenv("LOCALAPPDATA") ?: "${System.getenv("USERPROFILE")}/AppData/Local"
-            SystemInfo.isMac -> "~/Library/Caches/"
+            SystemInfo.isLinux -> System.getenv("XDG_CACHE_HOME") ?: System.getenv("HOME")?.plus("/.cache") ?: ".cache"
+            SystemInfo.isWindows ->  System.getenv("LOCALAPPDATA") ?: "${System.getenv("USERPROFILE") ?: ""}/AppData/Local"
+            SystemInfo.isMac -> (System.getenv("HOME")?.plus("/") ?: "") + "Library/Caches/"
             else -> null
         }?.let(Path::of)?.resolve(folderName)?.toAbsolutePath()?.let {
             cacheFolder = it
         }
     }
 
-    private val cacheMisses = ConcurrentHashMap<PluginDescriptor, Boolean>()
+    private val cacheMisses = ConcurrentHashMap<KotlinPluginDescriptor, Boolean>()
 
 //    fun updateProjectAwareState(project: Project) {
 //        if (!compatible || !cacheMisses.values.any()) {
@@ -71,7 +74,7 @@ class PluginStorageService(
 
         val nextJob = scope.launch(CoroutineName("jar-fetcher-root"), start = CoroutineStart.LAZY) {
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
-            val plugins = service<PluginSettingsService>().state.plugins
+            val plugins = service<KotlinPluginsSettingsService>().state.plugins
 
             logger.info("Actualize plugins job started (jar-fetcher-root), $kotlinIdeVersion: ${plugins.joinToString()}")
 
@@ -84,7 +87,7 @@ class PluginStorageService(
 
                         val jarPath = try {
                             withContext(Dispatchers.IO) {
-                                JarDownloader.downloadLatestIfNotExists(
+                                KotlinPluginsJarDownloader.downloadLatestIfNotExists(
                                     repoUrl = plugin.repoUrl,
                                     groupId = plugin.groupId,
                                     artifactId = plugin.artifactId,
@@ -114,9 +117,6 @@ class PluginStorageService(
                     }
                 }
             }
-
-//            // to update toolbar status
-//            ActivityTracker.getInstance().inc()
         }
 
         if (runningActualizeJob.compareAndSet(currentJob, nextJob)) {
@@ -138,7 +138,7 @@ class PluginStorageService(
         cacheMisses.clear()
     }
 
-    fun getPluginPath(descriptor: PluginDescriptor): Path? {
+    fun getPluginPath(descriptor: KotlinPluginDescriptor): Path? {
         if (!compatible) {
             return null
         }
@@ -167,16 +167,22 @@ class PluginStorageService(
     }
 }
 
-internal fun PluginDescriptor.getPluginPath(version: String): Path {
-    return getPluginGroupPath().resolve("$artifactId-$version.jar")
+internal fun invalidateKotlinPluginsCache(project: Project) {
+    val provider = KotlinCompilerPluginsProvider.getInstance(project)
+
+    if (provider is Disposable) {
+        provider.dispose() // clear Kotlin plugin caches
+    }
+
+    service<KotlinPluginsStorageService>().clearCacheMisses()
 }
 
-internal fun PluginDescriptor.getPluginGroupPath(): Path {
+internal fun KotlinPluginDescriptor.getPluginGroupPath(): Path {
     val group = groupId.split(".")
     return Path.of(group[0], *group.drop(1).toTypedArray())
 }
 
-class PluginStorage : BaseState() {
+class KotlinPluginsStorage : BaseState() {
     /**
      * <Kotlin IDE Version> to <plugin id> to <plugin jar path>
      * ```

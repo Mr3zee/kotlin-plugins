@@ -1,4 +1,4 @@
-package com.github.mr3zee.intellijcompilerpluginswap
+package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.components.Service
 import org.jetbrains.kotlin.idea.fir.extensions.KotlinK2BundledCompilerPlugins

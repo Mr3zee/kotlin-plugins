@@ -1,4 +1,4 @@
-package com.github.mr3zee.intellijcompilerpluginswap
+package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
@@ -8,31 +8,31 @@ import com.intellij.openapi.components.Storage
 
 @Service
 @State(
-    name = "CompilerPluginsSwapSettings",
-    storages = [Storage("kotlin-fir-compiler-plugins-swap.xml")]
+    name = "KotlinPluginsSettings",
+    storages = [Storage("kotlin-plugins-settings.xml")]
 )
-class PluginSettingsService : SimplePersistentStateComponent<PluginSettings>(PluginSettings())
+class KotlinPluginsSettingsService : SimplePersistentStateComponent<KotlinPluginsSettingsState>(KotlinPluginsSettingsState())
 
-class PluginSettings : BaseState() {
-    val plugins by treeSet<PluginDescriptor>()
+class KotlinPluginsSettingsState : BaseState() {
+    val plugins by treeSet<KotlinPluginDescriptor>()
 
     init {
-        if (plugins.add(PluginDescriptor.KotlinxRpc.CLI) or
-            plugins.add(PluginDescriptor.KotlinxRpc.K2) or
-            plugins.add(PluginDescriptor.KotlinxRpc.BACKEND) or
-            plugins.add(PluginDescriptor.KotlinxRpc.COMMON)
+        if (plugins.add(KotlinPluginDescriptor.KotlinxRpc.CLI) or
+            plugins.add(KotlinPluginDescriptor.KotlinxRpc.K2) or
+            plugins.add(KotlinPluginDescriptor.KotlinxRpc.BACKEND) or
+            plugins.add(KotlinPluginDescriptor.KotlinxRpc.COMMON)
         ) {
             incrementModificationCount()
         }
     }
 }
 
-data class PluginDescriptor(
+data class KotlinPluginDescriptor(
     val repoUrl: String,
     val groupId: String,
     val artifactId: String,
-) : Comparable<PluginDescriptor>, BaseState() {
-    override fun compareTo(other: PluginDescriptor): Int {
+) : Comparable<KotlinPluginDescriptor>, BaseState() {
+    override fun compareTo(other: KotlinPluginDescriptor): Int {
         return id.compareTo(other.id)
     }
 
@@ -43,7 +43,7 @@ data class PluginDescriptor(
     val id get() = "$groupId:$artifactId"
 
     object KotlinxRpc {
-        private fun kotlinxRpc(suffix: String) = PluginDescriptor(
+        private fun kotlinxRpc(suffix: String) = KotlinPluginDescriptor(
             repoUrl = "https://maven.pkg.jetbrains.space/public/p/krpc/for-ide",
             groupId = "org.jetbrains.kotlinx",
             artifactId = "kotlinx-rpc-compiler-plugin$suffix",

@@ -1,4 +1,4 @@
-package com.github.mr3zee.intellijcompilerpluginswap
+package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.components.service
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -50,7 +50,7 @@ class MyPluginTest : BasePlatformTestCase() {
     }
 
     fun testManifestDownload() = runBlocking {
-        val versions = JarDownloader.downloadManifestAndGetVersions(
+        val versions = KotlinPluginsJarDownloader.downloadManifestAndGetVersions(
             "[testManifestDownload]",
             "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin",
         ) ?: return@runBlocking fail("Failed to download manifest")
@@ -63,7 +63,7 @@ class MyPluginTest : BasePlatformTestCase() {
 
     fun testDownloadJar() = runBlocking {
         val tempFile = Files.createTempDirectory("testDownloadJar")
-        val result = JarDownloader.downloadLatestIfNotExists(
+        val result = KotlinPluginsJarDownloader.downloadLatestIfNotExists(
             repoUrl = "https://maven.pkg.jetbrains.space/public/p/krpc/maven",
             groupId = "org.jetbrains.kotlinx",
             artifactId = "kotlinx-rpc-compiler-plugin",
@@ -75,12 +75,5 @@ class MyPluginTest : BasePlatformTestCase() {
         assertNotNull(jarFile)
         assertTrue(jarFile!!.exists())
         assertEquals(jarFile.toPath(), result)
-    }
-
-    fun testPluginPath() {
-        val descriptor = PluginDescriptor.KotlinxRpc.CLI
-        val path = descriptor.getPluginPath("2.0.0")
-
-        assertEquals("org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin-cli-2.0.0.jar", path.toString())
     }
 }

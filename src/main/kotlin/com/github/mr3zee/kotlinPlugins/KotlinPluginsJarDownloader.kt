@@ -1,4 +1,4 @@
-package com.github.mr3zee.intellijcompilerpluginswap
+package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.diagnostic.thisLogger
 import io.ktor.client.*
@@ -19,8 +19,8 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.exists
 
-object JarDownloader {
-    private val logger by lazy { JarDownloader.thisLogger() }
+object KotlinPluginsJarDownloader {
+    private val logger by lazy { KotlinPluginsJarDownloader.thisLogger() }
 
     private val client by lazy {
         HttpClient(OkHttp) {
@@ -89,20 +89,31 @@ object JarDownloader {
 
         val status = client.prepareGet("$artifactUrl/$version/$filename").execute { httpResponse ->
             val requestUrl = httpResponse.request.url.toString()
-            logger.debug("$logTag Request URL: $requestUrl")
+            val len = httpResponse.contentLength()?.toDouble() ?: 0.0
+            logger.debug("$logTag Request URL: $requestUrl, size: $len")
 
             try {
-                val channel: ByteReadChannel = httpResponse.body()
-                while (!channel.isClosedForRead) {
-                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                    while (!packet.isEmpty) {
-                        val bytes: ByteArray = packet.readBytes()
-                        file.appendBytes(bytes)
-                        logger.debug("$logTag Received ${file.length()} / ${httpResponse.contentLength()}")
-                    }
-                }
+//                withBackgroundProgress(project = , "Downloading Kotlin Plugin") {
+//                    @Suppress("UnstableApiUsage")
+//                    reportRawProgress { reporter ->
+//                        reporter.fraction(file.length().toDouble() / len)
+//                        reporter.details("Downloading $filename, ${file.length()} / $len")
 
-                httpResponse.status
+                        val channel: ByteReadChannel = httpResponse.body()
+                        while (!channel.isClosedForRead) {
+                            val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
+                            while (!packet.isEmpty) {
+                                val bytes: ByteArray = packet.readBytes()
+                                file.appendBytes(bytes)
+//                                reporter.fraction(file.length().toDouble() / len)
+//                                reporter.details("Downloading $filename, ${file.length()} / $len")
+                                logger.debug("$logTag Received ${file.length()} / $len")
+                            }
+                        }
+
+                        httpResponse.status
+//                    }
+//                }
             } catch (e: CancellationException) {
                 logger.error("$logTag Cancellation while downloading file $filename", e)
                 throw e
