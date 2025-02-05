@@ -14,9 +14,13 @@ import io.ktor.utils.io.core.readBytes
 import org.jetbrains.kotlin.config.MavenComparableVersion
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.io.path.Path
+import kotlin.io.path.absolutePathString
+import kotlin.io.path.appendBytes
 import kotlin.io.path.exists
 
 internal object KotlinPluginsJarDownloader {
@@ -80,24 +84,26 @@ internal object KotlinPluginsJarDownloader {
             dest.toFile().mkdirs()
         }
 
-        val file = dest.resolve(filename).toFile()
+        val file: Path = dest.resolve(filename)
 
-        if (file.exists()) {
-            logger.debug("$logTag A file already exists: ${file.absolutePath}")
-            return file.toPath()
+        if (Files.exists(file)) {
+            logger.debug("$logTag A file already exists: ${file.absolutePathString()}")
+            return file
+        } else {
+            Files.createFile(file)
         }
 
         val status = client.prepareGet("$artifactUrl/$version/$filename").execute { httpResponse ->
             val requestUrl = httpResponse.request.url.toString()
-            val len = httpResponse.contentLength()?.toDouble() ?: 0.0
-            logger.debug("$logTag Request URL: $requestUrl, size: $len")
+            val contentLength = httpResponse.contentLength()?.toDouble() ?: 0.0
+            logger.debug("$logTag Request URL: $requestUrl, size: $contentLength")
 
             try {
 //                withBackgroundProgress(project = , "Downloading Kotlin Plugin") {
 //                    @Suppress("UnstableApiUsage")
 //                    reportRawProgress { reporter ->
-//                        reporter.fraction(file.length().toDouble() / len)
-//                        reporter.details("Downloading $filename, ${file.length()} / $len")
+//                        reporter.fraction(file.length().toDouble() / contentLength)
+//                        reporter.details("Downloading $filename, ${Files.size(file)} / contentLength")
 
                         val channel: ByteReadChannel = httpResponse.body()
                         while (!channel.isClosedForRead) {
@@ -105,9 +111,10 @@ internal object KotlinPluginsJarDownloader {
                             while (!packet.isEmpty) {
                                 val bytes: ByteArray = packet.readBytes()
                                 file.appendBytes(bytes)
-//                                reporter.fraction(file.length().toDouble() / len)
-//                                reporter.details("Downloading $filename, ${file.length()} / $len")
-                                logger.debug("$logTag Received ${file.length()} / $len")
+                                val size = Files.size(file)
+//                                reporter.fraction(size.toDouble() / contentLength)
+//                                reporter.details("Downloading $filename, $size / contentLength")
+                                logger.debug("$logTag Received $size / $contentLength")
                             }
                         }
 
@@ -124,7 +131,7 @@ internal object KotlinPluginsJarDownloader {
         }
 
         if (status?.isSuccess() != true) {
-            file.delete()
+            Files.delete(file)
             if (status != null) {
                 logger.debug("$logTag Failed to download file $filename: $status")
             }
@@ -134,7 +141,7 @@ internal object KotlinPluginsJarDownloader {
 
         logger.debug("$logTag File downloaded successfully")
 
-        return file.toPath()
+        return file
     }
 
     internal suspend fun downloadManifestAndGetVersions(logTag: String, artifactUrl: String): List<String>? {
