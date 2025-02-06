@@ -1,7 +1,8 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
@@ -13,6 +14,8 @@ import com.intellij.platform.eel.provider.getEelApiBlocking
 import com.intellij.platform.eel.provider.utils.userHomeBlocking
 import com.intellij.platform.eel.toNioPath
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.nio.file.Files
 import java.nio.file.Path
@@ -21,6 +24,8 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.Path
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 
 const val KOTLIN_PLUGINS_STORAGE_DIRECTORY = ".kotlinPlugins"
 
@@ -48,21 +53,80 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
     private val logger by lazy { thisLogger() }
 
     private val cacheMisses = ConcurrentHashMap<KotlinPluginDescriptor, Boolean>()
+    private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, Path?>>()
 
     private val runningActualizeJob = AtomicReference<Job?>(null)
 
-    fun actualizePlugins(project: Project?) {
+    private val pluginRequests = ConcurrentHashMap<KotlinPluginDescriptor, String>()
+    private val actualizeRequestQueue = Channel<Unit>(1024)
+
+    init {
+        scope.launch(CoroutineName("actualizer-root")) {
+            try {
+                supervisorScope {
+                    launch(CoroutineName("actualizer-loop")) {
+                        try {
+                            while (isActive) {
+                                delay(2.minutes)
+                                logger.debug("Scheduled actualize job started")
+                                actualizePlugins(null)
+                                // wait until the job is finished, when 2-min delay
+                            }
+                        } catch (_: CancellationException) {
+                            // ignore
+                        }
+                    }
+
+                    launch(CoroutineName("actualizer-consumer")) {
+                        try {
+                            while (isActive) {
+                                actualizeRequestQueue.receive()
+                                actualizePlugins(null)
+                            }
+                        } catch (_: ClosedReceiveChannelException) {
+                            logger.debug("Actualize request queue closed")
+                        } catch (_: CancellationException) {
+                            // ignore
+                        }
+                    }
+                }
+            } catch (_ : CancellationException) {
+                // ignore
+            }
+        }
+
+        scope.coroutineContext.job.invokeOnCompletion {
+            pluginRequests.clear()
+            cacheMisses.clear()
+            pluginsCache.clear()
+            runningActualizeJob.set(null)
+            actualizeRequestQueue.close()
+            logger.debug("Storage closed")
+        }
+    }
+
+    // aggregates multiple requests
+    private fun requestActualizePlugins(versioned: KotlinPluginDescriptorVersioned) {
+        versioned.version?.let { pluginRequests[versioned.descriptor] = it }
+
+        scope.launch(CoroutineName("actualize-plugins-request")) {
+            delay(50.milliseconds) // allow for aggregation
+            actualizeRequestQueue.send(Unit)
+        }
+    }
+
+    private fun CoroutineScope.actualizePlugins(project: Project?) {
         val currentJob = runningActualizeJob.get()
         if (currentJob != null && currentJob.isActive) {
-            logger.info("Actualize plugins job is already running")
+            logger.debug("Actualize plugins job is already running")
             return
         }
 
-        val nextJob = scope.launch(CoroutineName("jar-fetcher-root"), start = CoroutineStart.LAZY) {
+        val nextJob = launch(CoroutineName("jar-fetcher-root"), start = CoroutineStart.LAZY) {
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
             val plugins = service<KotlinPluginsSettingsService>().state.plugins
 
-            logger.info("Actualize plugins job started (jar-fetcher-root), $kotlinIdeVersion: ${plugins.joinToString()}")
+            logger.debug("Actualize plugins job started (jar-fetcher-root), $kotlinIdeVersion: ${plugins.joinToString()}")
 
             supervisorScope {
                 plugins.forEach { plugin ->
@@ -72,26 +136,47 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
                         ?: return@forEach
 
                     launch(CoroutineName("jar-fetcher-${plugin.groupId}-${plugin.artifactId}")) {
-                        val jarPath = try {
+                        val jarResult = runCatching {
                             withContext(Dispatchers.IO) {
-                                KotlinPluginsJarDownloader.downloadLatestIfNotExists(
+                                KotlinPluginsJarDownloader.downloadArtifactIfNotExists(
                                     repoUrl = plugin.repoUrl,
                                     groupId = plugin.groupId,
                                     artifactId = plugin.artifactId,
                                     kotlinIdeVersion = kotlinIdeVersion,
                                     dest = destination,
+                                    optionalPreferredLibVersion = { pluginRequests[plugin] }
                                 )
                             }
-                        } finally {
+                        }
+
+                        if (jarResult.isFailure) {
                             cacheMisses.computeIfPresent(plugin) { _, _ -> true }
                         }
 
-                        if (jarPath == null) {
+                        val jar = jarResult.getOrNull()
+
+                        if (jar == null) {
                             return@launch
                         }
 
-                        pluginsCache.getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
-                            .compute(plugin) { _, _ -> jarPath }
+                        val current = pluginRequests.compute(plugin) { _, old ->
+                            if (old == jar.preferredVersion) {
+                                null
+                            } else {
+                                old
+                            }
+                        }
+
+                        val valid = cacheMisses.computeIfPresent(plugin) { _, _ ->
+                            // true - no new request needed
+                            // false - another version was requested, needs to recalculate
+                            current == jar.preferredVersion
+                        } == true
+
+                        if (valid) {
+                            pluginsCache.getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
+                                .compute(plugin) { _, _ -> jar.path }
+                        }
                     }
                 }
             }
@@ -120,9 +205,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
         }
     }
 
-    private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, Path?>>()
-
-    fun getPluginPath(project: Project?, versioned: KotlinPluginDescriptorVersioned): Path? {
+    fun getPluginPath(versioned: KotlinPluginDescriptorVersioned): Path? {
         val kotlinVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
         val map = pluginsCache.getOrPut(kotlinVersion) { ConcurrentHashMap() }
@@ -137,7 +220,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
         if (path == null) {
             // cache miss, but no other version is present
             cacheMisses[versioned.descriptor] = false
-            actualizePlugins(project)
+            requestActualizePlugins(versioned)
         } else {
             cacheMisses.remove(versioned.descriptor)
         }

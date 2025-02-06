@@ -63,17 +63,18 @@ class MyPluginTest : BasePlatformTestCase() {
 
     fun testDownloadJar() = runBlocking {
         val tempFile = Files.createTempDirectory("testDownloadJar")
-        val result = KotlinPluginsJarDownloader.downloadLatestIfNotExists(
+        val result = KotlinPluginsJarDownloader.downloadArtifactIfNotExists(
             repoUrl = "https://maven.pkg.jetbrains.space/public/p/krpc/maven",
             groupId = "org.jetbrains.kotlinx",
             artifactId = "kotlinx-rpc-compiler-plugin",
             kotlinIdeVersion = "1.9.24",
             dest = tempFile,
+            optionalPreferredLibVersion = { null },
         )
 
         val jarFile = tempFile.toFile().listFiles()?.firstOrNull()
         assertNotNull(jarFile)
         assertTrue(jarFile!!.exists())
-        assertEquals(jarFile.toPath(), result)
+        assertEquals(jarFile.toPath(), result?.path)
     }
 }
