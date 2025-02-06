@@ -1,6 +1,8 @@
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.changelog.markdownToHTML
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.intellij.platform.gradle.models.ProductRelease
 import org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask
 import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
 
@@ -106,6 +108,22 @@ intellijPlatform {
         // Specify pre-release label to publish the plugin in a custom Release Channel automatically. Read more:
         // https://plugins.jetbrains.com/docs/intellij/deployment.html#specifying-a-release-channel
         channels = providers.gradleProperty("pluginVersion").map { listOf(it.substringAfter('-', "").substringBefore('.').ifEmpty { "default" }) }
+    }
+
+    pluginVerification {
+        ides {
+            select {
+                types = listOf(IntelliJPlatformType.IntellijIdeaCommunity)
+                channels = listOf(
+                    ProductRelease.Channel.RELEASE,
+                    ProductRelease.Channel.EAP,
+                    ProductRelease.Channel.BETA,
+                    ProductRelease.Channel.RC,
+                    ProductRelease.Channel.PREVIEW,
+                )
+                sinceBuild = providers.gradleProperty("pluginSinceBuild")
+            }
+        }
     }
 }
 

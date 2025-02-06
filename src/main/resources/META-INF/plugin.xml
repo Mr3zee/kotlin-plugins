@@ -1,12 +1,16 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.mr3zee.kotlinPlugins</id>
-    <name>Kotlin Plugins</name>
+    <name>Kotlin External FIR Support</name>
+    <description>
+        Provides support for external FIR based Kotlin compiler plugins.
+    </description>
     <vendor>Mr3zee</vendor>
     <category>Kotlin</category>
 
     <depends>org.jetbrains.kotlin</depends>
     <depends>com.intellij.gradle</depends>
+    <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <!--suppress PluginXmlValidity -->
