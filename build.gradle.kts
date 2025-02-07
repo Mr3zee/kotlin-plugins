@@ -93,6 +93,8 @@ intellijPlatform {
 
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")
+            // unlimited
+            untilBuild = provider { null }
         }
     }
 
@@ -122,6 +124,8 @@ intellijPlatform {
                     ProductRelease.Channel.PREVIEW,
                 )
                 sinceBuild = providers.gradleProperty("pluginSinceBuild")
+                // unlimited
+                untilBuild = provider { null }
             }
         }
     }

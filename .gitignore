@@ -1,5 +1,6 @@
 .gradle
 .idea
+!.idea/icon.svg
 .intellijPlatform
 .qodana
 build
