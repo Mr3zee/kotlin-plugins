@@ -1,6 +1,6 @@
 <!-- Keep a Changelog guide -> https://keepachangelog.com -->
 
-# intellij-compiler-plugin-swap Changelog
+# Kotlin External FIR Support Changelog
 
 ## [Unreleased]
 ### Added

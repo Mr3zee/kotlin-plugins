@@ -1,4 +1,4 @@
-# intellij-compiler-plugin-swap
+# Kotlin External FIR Support
 
 ![Build](https://github.com/Mr3zee/kotlin-plugins/workflows/Build/badge.svg)
 [![Version](https://img.shields.io/jetbrains/plugin/v/26480-kotlin-external-fir-support.svg)](https://plugins.jetbrains.com/plugin/26480-kotlin-external-fir-support)
