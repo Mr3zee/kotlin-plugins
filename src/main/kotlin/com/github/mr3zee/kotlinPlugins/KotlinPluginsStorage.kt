@@ -193,6 +193,10 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
                         invalidateKotlinPluginsCache(project)
                     } else {
                         KotlinPluginsProjectsMap.instances.forEach { (project, _) ->
+                            if (project.isDisposed) {
+                                KotlinPluginsProjectsMap.instances.remove(project)
+                            }
+
                             invalidateKotlinPluginsCache(project)
                         }
                     }

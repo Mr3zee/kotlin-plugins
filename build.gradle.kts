@@ -31,6 +31,8 @@ repositories {
     intellijPlatform {
         defaultRepositories()
         jetbrainsRuntime()
+        snapshots()
+        nightly()
     }
 }
 
@@ -94,7 +96,7 @@ intellijPlatform {
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")
             // unlimited
-            untilBuild = provider { null }
+//            untilBuild = provider { null }
         }
     }
 
@@ -125,7 +127,7 @@ intellijPlatform {
                 )
                 sinceBuild = providers.gradleProperty("pluginSinceBuild")
                 // unlimited
-                untilBuild = provider { null }
+//                untilBuild = provider { null }
             }
         }
     }
