@@ -9,15 +9,19 @@
     <category>Kotlin</category>
 
     <depends>org.jetbrains.kotlin</depends>
-    <depends>com.intellij.gradle</depends>
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <!--suppress PluginXmlValidity -->
         <bundledFirCompilerPluginProvider implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProvider"/>
-        <supportsKotlinPluginMode supportsK1="false" supportsK2="true" />
+        <supportsKotlinPluginMode supportsK1="false" supportsK2="true"/>
     </extensions>
-    <extensions defaultExtensionNs="com.intellij">
-        <postStartupActivity implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProjectsMap$StartupActivity"/>
-    </extensions>
+    <actions>
+        <action
+                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCacheAction"
+                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCacheAction"
+                text="Clear 'Kotlin FIR External Support' Cache"
+                description="Allows to clear the caches Kotlin plugins, so that the plugin can download the latest artifacts">
+        </action>
+    </actions>
 </idea-plugin>

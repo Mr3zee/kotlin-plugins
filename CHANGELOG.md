@@ -3,6 +3,12 @@
 # Kotlin External FIR Support Changelog
 
 ## [Unreleased]
+### Added
+- `Clear 'Kotlin FIR External Support' Cache` IDE Action
+### Fixed
+- Project-specific version resolution fixed
+
+## [0.0.2]
 ### Fixed
 - Exception for disposed projects
 

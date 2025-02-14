@@ -2,6 +2,7 @@ package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.project.Project
 import org.jetbrains.kotlin.idea.fir.extensions.KotlinBundledFirCompilerPluginProvider
 import java.nio.file.Path
 import kotlin.io.path.name
@@ -10,20 +11,19 @@ import kotlin.io.path.name
 class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     private val logger by lazy { thisLogger() }
 
-    override fun provideBundledPluginJar(userSuppliedPluginJar: Path): Path? {
+    override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {
         logger.info("Request for plugin jar: $userSuppliedPluginJar")
         val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull() ?: return null
-        logger.info("Found plugin descriptor: $descriptor")
-        // TODO pass project here
-        return service<KotlinPluginsStorageService>().getPluginPath(descriptor).also {
-            logger.info("Returning plugin jar: $it")
+        logger.debug("Found plugin descriptor: $descriptor")
+        return project.service<KotlinPluginsStorageService>().getPluginPath(descriptor).also {
+            logger.debug("Returning plugin jar: $it")
         }
     }
 
     private fun Path.toKotlinPluginDescriptorVersionedOrNull(): KotlinPluginDescriptorVersioned? {
         val descriptor = toKotlinPluginDescriptorOrNull() ?: return null
         val coreVersion = SEMVER_REGEX.findAll(name).lastOrNull()?.value
-        val version = coreVersion?.let { "$coreVersion${name.substringAfterLast(coreVersion)}" }
+        val version = coreVersion?.let { "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}" }
 
         return KotlinPluginDescriptorVersioned(descriptor, version)
     }

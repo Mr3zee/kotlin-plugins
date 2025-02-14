@@ -1,6 +1,9 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.project.Project
+import com.intellij.platform.ide.progress.withBackgroundProgress
+import com.intellij.platform.util.progress.reportRawProgress
 import io.ktor.client.*
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.*
@@ -9,8 +12,8 @@ import io.ktor.client.statement.*
 import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.core.isEmpty
-import io.ktor.utils.io.core.readBytes
+import io.ktor.utils.io.readRemaining
+import kotlinx.io.readByteArray
 import org.jetbrains.kotlin.config.MavenComparableVersion
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
@@ -21,11 +24,13 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.appendBytes
 import kotlin.io.path.exists
+import kotlin.io.path.fileSize
 
 data class JarResult(
     val path: Path,
     val libVersion: String,
     val preferredVersion: String?,
+    val downloaded: Boolean,
 )
 
 internal object KotlinPluginsJarDownloader {
@@ -44,6 +49,7 @@ internal object KotlinPluginsJarDownloader {
     private val logId = AtomicLong(0)
 
     suspend fun downloadArtifactIfNotExists(
+        project: Project,
         repoUrl: String,
         groupId: String,
         artifactId: String,
@@ -86,6 +92,7 @@ internal object KotlinPluginsJarDownloader {
         val forIdeFilename = "$artifactId-$artifactVersion-$FOR_IDE_CLASSIFIER.jar"
 
         val forIdeVersion = downloadJarIfNotExists(
+            project = project,
             dest = dest,
             filename = forIdeFilename,
             logTag = logTag,
@@ -101,6 +108,7 @@ internal object KotlinPluginsJarDownloader {
 
         val defaultFilename = "$artifactId-$artifactVersion.jar"
         return downloadJarIfNotExists(
+            project = project,
             dest = dest,
             filename = defaultFilename,
             logTag = logTag,
@@ -111,6 +119,7 @@ internal object KotlinPluginsJarDownloader {
     }
 
     private suspend fun downloadJarIfNotExists(
+        project: Project,
         dest: Path,
         filename: String,
         logTag: String,
@@ -126,39 +135,50 @@ internal object KotlinPluginsJarDownloader {
 
         if (Files.exists(file)) {
             logger.debug("$logTag A file already exists: ${file.absolutePathString()}")
-            return JarResult(file, version, preferredVersion)
+            return JarResult(file, version, preferredVersion, downloaded = false)
         } else {
             Files.createFile(file)
         }
 
         val status = client.prepareGet("$artifactUrl/$version/$filename").execute { httpResponse ->
+            if (!httpResponse.status.isSuccess()) {
+                return@execute httpResponse.status
+            }
+
             val requestUrl = httpResponse.request.url.toString()
             val contentLength = httpResponse.contentLength()?.toDouble() ?: 0.0
             logger.debug("$logTag Request URL: $requestUrl, size: $contentLength")
 
-            try {
-//                withBackgroundProgress(project = , "Downloading Kotlin Plugin") {
-//                    @Suppress("UnstableApiUsage")
-//                    reportRawProgress { reporter ->
-//                        reporter.fraction(file.length().toDouble() / contentLength)
-//                        reporter.details("Downloading $filename, ${Files.size(file)} / contentLength")
+            if (contentLength == 0.0) {
+                return@execute httpResponse.status
+            }
 
-                val channel: ByteReadChannel = httpResponse.body()
-                while (!channel.isClosedForRead) {
-                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                    while (!packet.isEmpty) {
-                        val bytes: ByteArray = packet.readBytes()
-                        file.appendBytes(bytes)
-                        val size = Files.size(file)
-//                                reporter.fraction(size.toDouble() / contentLength)
-//                                reporter.details("Downloading $filename, $size / contentLength")
-                        logger.debug("$logTag Received $size / $contentLength")
+            try {
+                withBackgroundProgress(project = project, "Downloading Kotlin Plugin") {
+                    @Suppress("UnstableApiUsage")
+                    reportRawProgress { reporter ->
+                        val fileSize = file.fileSize().toDouble()
+                        val fraction = fileSize / contentLength
+                        logger.debug("$logTag Reported progress: $fraction, file size: $fileSize")
+                        reporter.fraction(fraction)
+                        reporter.details("Downloading $filename, ${Files.size(file)} / contentLength")
+
+                        val channel: ByteReadChannel = httpResponse.body()
+                        while (!channel.isClosedForRead) {
+                            val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
+                            while (!packet.exhausted()) {
+                                val bytes: ByteArray = packet.readByteArray()
+                                file.appendBytes(bytes)
+                                val size = Files.size(file)
+                                reporter.fraction(size.toDouble() / contentLength)
+                                reporter.details("Downloading $filename, $size / contentLength")
+                                logger.debug("$logTag Received $size / $contentLength")
+                            }
+                        }
+
+                        httpResponse.status
                     }
                 }
-
-                httpResponse.status
-//                    }
-//                }
             } catch (e: CancellationException) {
                 logger.error("$logTag Cancellation while downloading file $filename", e)
                 throw e
@@ -179,7 +199,7 @@ internal object KotlinPluginsJarDownloader {
 
         logger.debug("$logTag File downloaded successfully")
 
-        return JarResult(file, version, preferredVersion)
+        return JarResult(file, version, preferredVersion, downloaded = true)
     }
 
     internal suspend fun downloadManifestAndGetVersions(logTag: String, artifactUrl: String): List<String>? {

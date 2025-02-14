@@ -64,6 +64,7 @@ class MyPluginTest : BasePlatformTestCase() {
     fun testDownloadJar() = runBlocking {
         val tempFile = Files.createTempDirectory("testDownloadJar")
         val result = KotlinPluginsJarDownloader.downloadArtifactIfNotExists(
+            project = project,
             repoUrl = "https://maven.pkg.jetbrains.space/public/p/krpc/maven",
             groupId = "org.jetbrains.kotlinx",
             artifactId = "kotlinx-rpc-compiler-plugin",

@@ -29,9 +29,9 @@ repositories {
 
     // IntelliJ Platform Gradle Plugin Repositories Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-repositories-extension.html
     intellijPlatform {
-        defaultRepositories()
+        defaultRepositories() // https://www.jetbrains.com/intellij-repository/releases, search com.jetbrains.intellij.idea
         jetbrainsRuntime()
-        snapshots()
+        snapshots() // https://www.jetbrains.com/intellij-repository/snapshots
         nightly()
     }
 }
@@ -55,7 +55,6 @@ dependencies {
         // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file for plugin from JetBrains Marketplace.
         plugins(providers.gradleProperty("platformPlugins").map { it.split(',') })
 
-        instrumentationTools()
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)
@@ -96,7 +95,7 @@ intellijPlatform {
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")
             // unlimited
-//            untilBuild = provider { null }
+            untilBuild = provider { null }
         }
     }
 
@@ -127,7 +126,7 @@ intellijPlatform {
                 )
                 sinceBuild = providers.gradleProperty("pluginSinceBuild")
                 // unlimited
-//                untilBuild = provider { null }
+                untilBuild = provider { null }
             }
         }
     }

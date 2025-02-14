@@ -5,23 +5,24 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.platform.eel.EelApi
-import com.intellij.platform.eel.fs.EelFileSystemApi
-import com.intellij.platform.eel.path.EelPath
-import com.intellij.platform.eel.provider.getEelApi
-import com.intellij.platform.eel.provider.getEelApiBlocking
-import com.intellij.platform.eel.provider.utils.userHomeBlocking
-import com.intellij.platform.eel.toNioPath
+import com.intellij.platform.eel.provider.asNioPathOrNull
+import com.intellij.platform.eel.provider.getEelDescriptor
+import com.intellij.platform.eel.provider.upgradeBlocking
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
+import kotlin.io.path.deleteRecursively
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.milliseconds
@@ -29,25 +30,52 @@ import kotlin.time.Duration.Companion.minutes
 
 const val KOTLIN_PLUGINS_STORAGE_DIRECTORY = ".kotlinPlugins"
 
-@Service
-class KotlinPluginsStorageService(private val scope: CoroutineScope) {
+@Service(Service.Level.PROJECT)
+class KotlinPluginsStorageService(
+    private val project: Project,
+    private val scope: CoroutineScope,
+) {
     private var resolvedCacheDir = false
     private var _cacheDir: Path? = null
 
     @Suppress("UnstableApiUsage")
-    suspend fun cacheDir(project: Project?): Path? {
-        return resolveCacheDir(
-            getApi = { project?.getEelApi() },
-            getUserHome = { userHome() },
-        )
+    suspend fun cacheDir(): Path? {
+        return resolveCacheDir { project.getEelDescriptor().upgrade() }
     }
 
     @Suppress("UnstableApiUsage")
-    fun cacheDirBlocking(project: Project?): Path? {
-        return resolveCacheDir(
-            getApi = { project?.getEelApiBlocking() },
-            getUserHome = { userHomeBlocking() },
-        )
+    fun cacheDirBlocking(): Path? {
+        return resolveCacheDir { project.getEelDescriptor().upgradeBlocking() }
+    }
+
+    fun clearCaches() {
+        scope.launch(CoroutineName("clear-caches")) {
+            try {
+                while (true) {
+                    runningActualizeJob.get()?.cancelAndJoin()
+                    if (actualizerLock.tryLock()) {
+                        break
+                    }
+                }
+
+                runningActualizeJob.get()?.cancelAndJoin()
+                runningActualizeJob.set(null)
+
+                pluginRequests.clear()
+                cacheMisses.clear()
+                pluginsCache.clear()
+                invalidateKotlinPluginsCache()
+
+                cacheDir()?.let {
+                    @OptIn(ExperimentalPathApi::class)
+                    runCatching {
+                        it.deleteRecursively()
+                    }
+                }
+            } finally {
+                actualizerLock.unlock()
+            }
+        }
     }
 
     private val logger by lazy { thisLogger() }
@@ -69,7 +97,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
                             while (isActive) {
                                 delay(2.minutes)
                                 logger.debug("Scheduled actualize job started")
-                                actualizePlugins(null)
+                                actualizePlugins()
                                 // wait until the job is finished, when 2-min delay
                             }
                         } catch (_: CancellationException) {
@@ -81,7 +109,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
                         try {
                             while (isActive) {
                                 actualizeRequestQueue.receive()
-                                actualizePlugins(null)
+                                actualizePlugins()
                             }
                         } catch (_: ClosedReceiveChannelException) {
                             logger.debug("Actualize request queue closed")
@@ -90,7 +118,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
                         }
                     }
                 }
-            } catch (_ : CancellationException) {
+            } catch (_: CancellationException) {
                 // ignore
             }
         }
@@ -115,14 +143,25 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
         }
     }
 
-    private fun CoroutineScope.actualizePlugins(project: Project?) {
+    private val actualizerLock = Mutex()
+
+    private fun CoroutineScope.launchFetcher(body: suspend CoroutineScope.() -> Unit): Job {
+        return launch(CoroutineName("jar-fetcher-root"), start = CoroutineStart.LAZY) {
+            actualizerLock.withLock {
+                body()
+            }
+        }
+    }
+
+    private fun CoroutineScope.actualizePlugins() {
         val currentJob = runningActualizeJob.get()
         if (currentJob != null && currentJob.isActive) {
             logger.debug("Actualize plugins job is already running")
             return
         }
 
-        val nextJob = launch(CoroutineName("jar-fetcher-root"), start = CoroutineStart.LAZY) {
+        val changed = AtomicBoolean(false)
+        val nextJob = launchFetcher {
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
             val plugins = service<KotlinPluginsSettingsService>().state.plugins
 
@@ -130,7 +169,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
 
             supervisorScope {
                 plugins.forEach { plugin ->
-                    val destination = cacheDir(project)
+                    val destination = cacheDir()
                         ?.resolve(kotlinIdeVersion)
                         ?.resolve(plugin.getPluginGroupPath())
                         ?: return@forEach
@@ -139,6 +178,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
                         val jarResult = runCatching {
                             withContext(Dispatchers.IO) {
                                 KotlinPluginsJarDownloader.downloadArtifactIfNotExists(
+                                    project = project,
                                     repoUrl = plugin.repoUrl,
                                     groupId = plugin.groupId,
                                     artifactId = plugin.artifactId,
@@ -157,6 +197,10 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
 
                         if (jar == null) {
                             return@launch
+                        }
+
+                        if (jar.downloaded) {
+                            changed.compareAndSet(false, true)
                         }
 
                         val current = pluginRequests.compute(plugin) { _, old ->
@@ -187,19 +231,9 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
                 runningActualizeJob.compareAndSet(nextJob, null)
 
                 if (cacheMisses.any { !it.value }) {
-                    actualizePlugins(project)
-                } else {
-                    if (project != null) {
-                        invalidateKotlinPluginsCache(project)
-                    } else {
-                        KotlinPluginsProjectsMap.instances.forEach { (project, _) ->
-                            if (project.isDisposed) {
-                                KotlinPluginsProjectsMap.instances.remove(project)
-                            }
-
-                            invalidateKotlinPluginsCache(project)
-                        }
-                    }
+                    actualizePlugins()
+                } else if (changed.get()) {
+                    invalidateKotlinPluginsCache()
                 }
             }
 
@@ -224,10 +258,12 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
         if (path == null) {
             // cache miss, but no other version is present
             cacheMisses[versioned.descriptor] = false
-            requestActualizePlugins(versioned)
         } else {
             cacheMisses.remove(versioned.descriptor)
         }
+
+        // request anyway, as there might be more specific version
+        requestActualizePlugins(versioned)
 
         return path
     }
@@ -236,7 +272,7 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
         versioned: KotlinPluginDescriptorVersioned,
         kotlinVersion: String,
     ): Path? {
-        val basePath = cacheDirBlocking(null)
+        val basePath = cacheDirBlocking()
             ?.resolve(kotlinVersion)
             ?.resolve(versioned.descriptor.getPluginGroupPath())
             ?: return null
@@ -262,32 +298,19 @@ class KotlinPluginsStorageService(private val scope: CoroutineScope) {
     }
 
     @Suppress("UnstableApiUsage")
-    private inline fun resolveCacheDir(
-        getApi: () -> EelApi?,
-        getUserHome: EelFileSystemApi.() -> EelPath.Absolute?,
-    ): Path? {
+    private inline fun resolveCacheDir(getApi: () -> EelApi): Path? {
         if (resolvedCacheDir) {
             return _cacheDir
         }
 
-        val eel = getApi()
-
-        val userHome = if (eel == null) {
-            when {
-                SystemInfo.isWindows -> System.getenv("USERPROFILE")
-                else -> System.getenv("HOME")
-            }?.let(Path::of)
-        } else {
-            eel.fs.getUserHome()?.toNioPath(eel) ?: Path("/") // user is nobody
-        }
-
-        _cacheDir = userHome?.resolve(KOTLIN_PLUGINS_STORAGE_DIRECTORY)?.toAbsolutePath()
+        val userHome = getApi().fs.user.home.asNioPathOrNull() ?: Path("/") // user is nobody
+        _cacheDir = userHome.resolve(KOTLIN_PLUGINS_STORAGE_DIRECTORY)?.toAbsolutePath()
         resolvedCacheDir = true
 
         return _cacheDir
     }
 
-    private fun invalidateKotlinPluginsCache(project: Project) {
+    private fun invalidateKotlinPluginsCache() {
         val provider = KotlinCompilerPluginsProvider.getInstance(project)
 
         if (provider is Disposable) {

@@ -6,7 +6,7 @@ import org.jetbrains.kotlin.idea.fir.extensions.KotlinK2BundledCompilerPlugins
 @Service
 class KotlinVersionService {
     private val version by lazy {
-        KotlinK2BundledCompilerPlugins.javaClass.classLoader
+        KotlinK2BundledCompilerPlugins::class.java.classLoader
             .getResourceAsStream("META-INF/compiler.version")?.use { stream ->
                 stream.readAllBytes().decodeToString()
             }?.trim() ?: error("Kotlin version file not found")
