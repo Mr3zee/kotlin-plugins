@@ -12,7 +12,7 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     private val logger by lazy { thisLogger() }
 
     override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {
-        logger.info("Request for plugin jar: $userSuppliedPluginJar")
+        logger.debug("Request for plugin jar: $userSuppliedPluginJar")
         val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull() ?: return null
         logger.debug("Found plugin descriptor: $descriptor")
         return project.service<KotlinPluginsStorageService>().getPluginPath(descriptor).also {

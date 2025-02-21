@@ -5,8 +5,10 @@
 ## [Unreleased]
 ### Added
 - `Clear 'Kotlin FIR External Support' Cache` IDE Action
+- 251 IDE Versions Support
 ### Fixed
 - Project-specific version resolution fixed
+- "Container 'ProjectImpl@ services' was disposed" exception
 
 ## [0.0.2]
 ### Fixed

@@ -4,6 +4,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.provider.asNioPathOrNull
@@ -29,6 +30,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 
 const val KOTLIN_PLUGINS_STORAGE_DIRECTORY = ".kotlinPlugins"
+private const val CACHE_MISS_ANY_KEY = "<any>"
 
 @Service(Service.Level.PROJECT)
 class KotlinPluginsStorageService(
@@ -80,12 +82,12 @@ class KotlinPluginsStorageService(
 
     private val logger by lazy { thisLogger() }
 
-    private val cacheMisses = ConcurrentHashMap<KotlinPluginDescriptor, Boolean>()
-    private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, Path?>>()
+    private val cacheMisses = ConcurrentHashMap<KotlinPluginDescriptor, ConcurrentHashMap<String, Boolean>>()
+    private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, ConcurrentHashMap<String, Path>>>()
 
     private val runningActualizeJob = AtomicReference<Job?>(null)
 
-    private val pluginRequests = ConcurrentHashMap<KotlinPluginDescriptor, String>()
+    private val pluginRequests = ConcurrentHashMap<KotlinPluginDescriptor, Set<String>>()
     private val actualizeRequestQueue = Channel<Unit>(1024)
 
     init {
@@ -135,7 +137,7 @@ class KotlinPluginsStorageService(
 
     // aggregates multiple requests
     private fun requestActualizePlugins(versioned: KotlinPluginDescriptorVersioned) {
-        versioned.version?.let { pluginRequests[versioned.descriptor] = it }
+        versioned.version?.let { pluginRequests.compute(versioned.descriptor) { _, old -> old?.plus(it) ?: setOf(it) } }
 
         scope.launch(CoroutineName("actualize-plugins-request")) {
             delay(50.milliseconds) // allow for aggregation
@@ -175,7 +177,9 @@ class KotlinPluginsStorageService(
                         ?: return@forEach
 
                     launch(CoroutineName("jar-fetcher-${plugin.groupId}-${plugin.artifactId}")) {
-                        val jarResult = runCatching {
+                        val pluginCacheMisses = cacheMisses.computeIfAbsent(plugin) { ConcurrentHashMap() }
+
+                        val jarResults = runCatching {
                             withContext(Dispatchers.IO) {
                                 KotlinPluginsJarDownloader.downloadArtifactIfNotExists(
                                     project = project,
@@ -184,42 +188,32 @@ class KotlinPluginsStorageService(
                                     artifactId = plugin.artifactId,
                                     kotlinIdeVersion = kotlinIdeVersion,
                                     dest = destination,
-                                    optionalPreferredLibVersion = { pluginRequests[plugin] }
+                                    optionalPreferredLibVersions = { pluginRequests[plugin].orEmpty() }
                                 )
                             }
                         }
 
-                        if (jarResult.isFailure) {
-                            cacheMisses.computeIfPresent(plugin) { _, _ -> true }
+                        if (jarResults.isFailure) {
+                            pluginCacheMisses.computeIfPresent(CACHE_MISS_ANY_KEY) { _, _ -> true }
                         }
 
-                        val jar = jarResult.getOrNull()
-
-                        if (jar == null) {
-                            return@launch
-                        }
-
-                        if (jar.downloaded) {
-                            changed.compareAndSet(false, true)
-                        }
-
-                        val current = pluginRequests.compute(plugin) { _, old ->
-                            if (old == jar.preferredVersion) {
-                                null
-                            } else {
-                                old
+                        jarResults.getOrNull()?.forEach { jar ->
+                            if (jar.downloaded) {
+                                changed.compareAndSet(false, true)
                             }
-                        }
 
-                        val valid = cacheMisses.computeIfPresent(plugin) { _, _ ->
-                            // true - no new request needed
-                            // false - another version was requested, needs to recalculate
-                            current == jar.preferredVersion
-                        } == true
+                            val libVersion = jar.artifactVersion.removePrefix("$kotlinIdeVersion-")
 
-                        if (valid) {
+                            pluginRequests.compute(plugin) { _, old ->
+                                old.orEmpty() - libVersion
+                            }
+
+                            // no recalculation needed
+                            pluginCacheMisses[libVersion] = true
+
                             pluginsCache.getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
-                                .compute(plugin) { _, _ -> jar.path }
+                                .getOrPut(plugin) { ConcurrentHashMap() }
+                                .compute(libVersion) { _, _ -> jar.path }
                         }
                     }
                 }
@@ -230,7 +224,8 @@ class KotlinPluginsStorageService(
             nextJob.invokeOnCompletion {
                 runningActualizeJob.compareAndSet(nextJob, null)
 
-                if (cacheMisses.any { !it.value }) {
+                if (cacheMisses.flatMap { it.value.values }.any { !it }) {
+                    logger.debug("Actualize plugins job self-launch: ${cacheMisses.entries.joinToString { (k, v) -> "{$k: [${v.entries.joinToString { (k1, v1) -> "[$k1 -> $v1]" }}]" }}")
                     actualizePlugins()
                 } else if (changed.get()) {
                     invalidateKotlinPluginsCache()
@@ -247,23 +242,53 @@ class KotlinPluginsStorageService(
         val kotlinVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
         val map = pluginsCache.getOrPut(kotlinVersion) { ConcurrentHashMap() }
-        val path = map.compute(versioned.descriptor) { _, old ->
-            if (old == null || !Files.exists(old)) {
-                findJarPath(versioned, kotlinVersion)
-            } else {
-                old
+        val pluginMap = map.getOrPut(versioned.descriptor) { ConcurrentHashMap() }
+
+        val (locatedVersion, path) = if (versioned.version == null) {
+            findJarPath(versioned, kotlinVersion)?.also { (version, path) ->
+                pluginMap.compute(version) { _, old ->
+                    when {
+                        old != null && Files.exists(old) -> old
+                        else -> path
+                    }
+                }
             }
-        }
-
-        if (path == null) {
-            // cache miss, but no other version is present
-            cacheMisses[versioned.descriptor] = false
         } else {
-            cacheMisses.remove(versioned.descriptor)
-        }
+            val foundInFiles by lazy {
+                findJarPath(versioned, kotlinVersion)
+            }
 
-        // request anyway, as there might be more specific version
-        requestActualizePlugins(versioned)
+            var searchedInFiles = false
+
+            val path = pluginMap.compute(versioned.version) { _, old ->
+                when {
+                    old != null && Files.exists(old) -> old
+                    else -> {
+                        searchedInFiles = true
+                        foundInFiles?.second
+                    }
+                }
+            }
+
+            if (searchedInFiles) {
+                foundInFiles?.first
+            } else {
+                versioned.version
+            } to path
+
+        } ?: (null to null)
+
+        logger.debug("Requested version is ${versioned.version} for ${versioned.descriptor}, located version: $locatedVersion, path: $path")
+
+        val descriptorCacheMisses = cacheMisses.computeIfAbsent(versioned.descriptor) { ConcurrentHashMap() }
+        if (path == null || locatedVersion != versioned.version) {
+            // cache miss, no requested version is present
+            descriptorCacheMisses[versioned.version ?: CACHE_MISS_ANY_KEY] = false
+            requestActualizePlugins(versioned)
+        } else {
+            descriptorCacheMisses.remove(versioned.version)
+            descriptorCacheMisses.remove(CACHE_MISS_ANY_KEY)
+        }
 
         return path
     }
@@ -271,7 +296,7 @@ class KotlinPluginsStorageService(
     private fun findJarPath(
         versioned: KotlinPluginDescriptorVersioned,
         kotlinVersion: String,
-    ): Path? {
+    ): Pair<String, Path>? {
         val basePath = cacheDirBlocking()
             ?.resolve(kotlinVersion)
             ?.resolve(versioned.descriptor.getPluginGroupPath())
@@ -289,12 +314,20 @@ class KotlinPluginsStorageService(
             candidates.find {
                 it.name.endsWith("-${versioned.version}-$FOR_IDE_CLASSIFIER.jar") ||
                         it.name.endsWith("-${versioned.version}.jar")
-            }?.let { return it }
+            }?.let { return versioned.version to it }
         }
 
-        candidates.find { it.name.endsWith("-$FOR_IDE_CLASSIFIER.jar") }?.let { return it }
+        val versionToPath = candidates.filter { it.name.endsWith("-$FOR_IDE_CLASSIFIER.jar") }
+            .associateBy {
+                it.name
+                    .substringAfter("${versioned.descriptor.artifactId}-$kotlinVersion-")
+                    .substringBefore("-$FOR_IDE_CLASSIFIER.jar")
+                    .substringBefore(".jar")
+            }
 
-        return candidates.firstOrNull()
+        val latest = getLatestVersion(versionToPath.keys.toList(), "")
+
+        return latest?.let { it to versionToPath.getValue(it) }
     }
 
     @Suppress("UnstableApiUsage")
@@ -311,13 +344,18 @@ class KotlinPluginsStorageService(
     }
 
     private fun invalidateKotlinPluginsCache() {
-        val provider = KotlinCompilerPluginsProvider.getInstance(project)
+        try {
+            val provider = KotlinCompilerPluginsProvider.getInstance(project)
 
-        if (provider is Disposable) {
-            provider.dispose() // clear Kotlin plugin caches
+            if (provider is Disposable) {
+                provider.dispose() // clear Kotlin plugin caches
+            }
+
+            cacheMisses.clear()
+            logger.debug("Invalidated KotlinCompilerPluginsProvider and cleared cache misses")
+        } catch (_ : ProcessCanceledException) {
+            // fixes "Container 'ProjectImpl@341936598 services' was disposed"
         }
-
-        cacheMisses.clear()
     }
 
     private fun KotlinPluginDescriptor.getPluginGroupPath(): Path {

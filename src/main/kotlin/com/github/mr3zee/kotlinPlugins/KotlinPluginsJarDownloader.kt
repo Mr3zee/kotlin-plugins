@@ -28,8 +28,7 @@ import kotlin.io.path.fileSize
 
 data class JarResult(
     val path: Path,
-    val libVersion: String,
-    val preferredVersion: String?,
+    val artifactVersion: String,
     val downloaded: Boolean,
 )
 
@@ -55,18 +54,54 @@ internal object KotlinPluginsJarDownloader {
         artifactId: String,
         kotlinIdeVersion: String,
         dest: Path,
-        optionalPreferredLibVersion: () -> String?,
-    ): JarResult? {
+        optionalPreferredLibVersions: () -> Set<String>,
+    ): List<JarResult> {
         val logTag = "[$groupId:$artifactId:${logId.andIncrement}]"
         logger.debug("$logTag Checking the latest version for $kotlinIdeVersion from $repoUrl")
 
         val groupUrl = groupId.replace(".", "/")
         val artifactUrl = "$repoUrl/$groupUrl/$artifactId"
 
-        val versions = downloadManifestAndGetVersions(logTag, artifactUrl) ?: return null
+        val versions = downloadManifestAndGetVersions(logTag, artifactUrl) ?: return emptyList()
 
-        val requestedLibVersion = optionalPreferredLibVersion()
+        val requestedLibVersions = optionalPreferredLibVersions()
+        if (requestedLibVersions.isNotEmpty()) {
+            return requestedLibVersions.mapNotNull {
+                downloadArtifactIfNotExists(
+                    logTag = logTag,
+                    versions = versions,
+                    project = project,
+                    artifactUrl = artifactUrl,
+                    artifactId = artifactId,
+                    kotlinIdeVersion = kotlinIdeVersion,
+                    dest = dest,
+                    requestedLibVersion = it,
+                )
+            }
+        } else {
+            return downloadArtifactIfNotExists(
+                logTag = logTag,
+                versions = versions,
+                project = project,
+                artifactUrl = artifactUrl,
+                artifactId = artifactId,
+                kotlinIdeVersion = kotlinIdeVersion,
+                dest = dest,
+                requestedLibVersion = null,
+            )?.let { listOf(it) } ?: emptyList()
+        }
+    }
 
+    suspend fun downloadArtifactIfNotExists(
+        logTag: String,
+        versions: List<String>,
+        project: Project,
+        artifactUrl: String,
+        artifactId: String,
+        kotlinIdeVersion: String,
+        dest: Path,
+        requestedLibVersion: String?,
+    ): JarResult? {
         val exactVersion: String? = if (requestedLibVersion != null) {
             logger.debug("$logTag Requested exact version: $requestedLibVersion")
             val full = "$kotlinIdeVersion-$requestedLibVersion"
@@ -78,7 +113,7 @@ internal object KotlinPluginsJarDownloader {
         if (exactVersion != null) {
             logger.debug("$logTag Found exact version")
         } else {
-            logger.debug("$logTag No exact version exists")
+            logger.debug("$logTag No exact version ${if(requestedLibVersion == null) "requested" else "exists"}")
         }
 
         val artifactVersion = exactVersion
@@ -98,8 +133,8 @@ internal object KotlinPluginsJarDownloader {
             logTag = logTag,
             artifactUrl = artifactUrl,
             version = artifactVersion,
-            preferredVersion = requestedLibVersion,
         )
+
         if (forIdeVersion != null) {
             return forIdeVersion
         }
@@ -114,7 +149,6 @@ internal object KotlinPluginsJarDownloader {
             logTag = logTag,
             artifactUrl = artifactUrl,
             version = artifactVersion,
-            preferredVersion = requestedLibVersion,
         )
     }
 
@@ -125,7 +159,6 @@ internal object KotlinPluginsJarDownloader {
         logTag: String,
         artifactUrl: String,
         version: String,
-        preferredVersion: String?,
     ): JarResult? {
         if (!dest.exists()) {
             dest.toFile().mkdirs()
@@ -135,14 +168,14 @@ internal object KotlinPluginsJarDownloader {
 
         if (Files.exists(file)) {
             logger.debug("$logTag A file already exists: ${file.absolutePathString()}")
-            return JarResult(file, version, preferredVersion, downloaded = false)
+            return JarResult(file, version, downloaded = false)
         } else {
             Files.createFile(file)
         }
 
-        val status = client.prepareGet("$artifactUrl/$version/$filename").execute { httpResponse ->
+        val response = client.prepareGet("$artifactUrl/$version/$filename").execute { httpResponse ->
             if (!httpResponse.status.isSuccess()) {
-                return@execute httpResponse.status
+                return@execute httpResponse
             }
 
             val requestUrl = httpResponse.request.url.toString()
@@ -150,7 +183,7 @@ internal object KotlinPluginsJarDownloader {
             logger.debug("$logTag Request URL: $requestUrl, size: $contentLength")
 
             if (contentLength == 0.0) {
-                return@execute httpResponse.status
+                return@execute httpResponse
             }
 
             try {
@@ -161,7 +194,7 @@ internal object KotlinPluginsJarDownloader {
                         val fraction = fileSize / contentLength
                         logger.debug("$logTag Reported progress: $fraction, file size: $fileSize")
                         reporter.fraction(fraction)
-                        reporter.details("Downloading $filename, ${Files.size(file)} / contentLength")
+                        reporter.details("Downloading $filename, ${Files.size(file)} / $contentLength")
 
                         val channel: ByteReadChannel = httpResponse.body()
                         while (!channel.isClosedForRead) {
@@ -171,12 +204,12 @@ internal object KotlinPluginsJarDownloader {
                                 file.appendBytes(bytes)
                                 val size = Files.size(file)
                                 reporter.fraction(size.toDouble() / contentLength)
-                                reporter.details("Downloading $filename, $size / contentLength")
-                                logger.debug("$logTag Received $size / $contentLength")
+                                reporter.details("Downloading $filename, $size / $contentLength")
+                                logger.trace("$logTag Received $size / $contentLength")
                             }
                         }
 
-                        httpResponse.status
+                        httpResponse
                     }
                 }
             } catch (e: CancellationException) {
@@ -188,10 +221,10 @@ internal object KotlinPluginsJarDownloader {
             }
         }
 
-        if (status?.isSuccess() != true) {
+        if (response?.status?.isSuccess() != true) {
             Files.delete(file)
-            if (status != null) {
-                logger.debug("$logTag Failed to download file $filename: $status")
+            if (response != null) {
+                logger.debug("$logTag Failed to download file $filename: ${response.status} - ${response.bodyAsText()}")
             }
 
             return null
@@ -199,7 +232,7 @@ internal object KotlinPluginsJarDownloader {
 
         logger.debug("$logTag File downloaded successfully")
 
-        return JarResult(file, version, preferredVersion, downloaded = true)
+        return JarResult(file, version, downloaded = true)
     }
 
     internal suspend fun downloadManifestAndGetVersions(logTag: String, artifactUrl: String): List<String>? {

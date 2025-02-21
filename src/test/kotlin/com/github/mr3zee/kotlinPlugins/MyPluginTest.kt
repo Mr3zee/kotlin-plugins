@@ -70,8 +70,8 @@ class MyPluginTest : BasePlatformTestCase() {
             artifactId = "kotlinx-rpc-compiler-plugin",
             kotlinIdeVersion = "1.9.24",
             dest = tempFile,
-            optionalPreferredLibVersion = { null },
-        )
+            optionalPreferredLibVersions = { emptySet() },
+        ).firstOrNull()
 
         val jarFile = tempFile.toFile().listFiles()?.firstOrNull()
         assertNotNull(jarFile)
