@@ -1,5 +1,6 @@
 package com.github.mr3zee.kotlinPlugins
 
+import com.github.mr3zee.kotlinPlugins.KotlinPluginsJarDownloader.lockedFiles
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
+import kotlin.io.path.absolutePathString
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
@@ -281,7 +283,7 @@ class KotlinPluginsStorageService(
         logger.debug("Requested version is ${versioned.version} for ${versioned.descriptor}, located version: $locatedVersion, path: $path")
 
         val descriptorCacheMisses = cacheMisses.computeIfAbsent(versioned.descriptor) { ConcurrentHashMap() }
-        if (path == null || locatedVersion != versioned.version) {
+        if (path == null || lockedFiles.contains(path.absolutePathString()) || locatedVersion != versioned.version) {
             // cache miss, no requested version is present
             descriptorCacheMisses[versioned.version ?: CACHE_MISS_ANY_KEY] = false
             requestActualizePlugins(versioned)

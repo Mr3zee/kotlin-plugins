@@ -19,6 +19,7 @@ import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.absolutePathString
@@ -33,6 +34,8 @@ data class JarResult(
 )
 
 internal object KotlinPluginsJarDownloader {
+    val lockedFiles = ConcurrentHashMap<String, Unit>()
+
     private val logger by lazy { KotlinPluginsJarDownloader.thisLogger() }
 
     private val client by lazy {
@@ -173,6 +176,30 @@ internal object KotlinPluginsJarDownloader {
             Files.createFile(file)
         }
 
+        return try {
+            lockedFiles[file.absolutePathString()] = Unit
+
+            downloadJarIfNotExistsUnderLock(
+                project = project,
+                file = file,
+                filename = filename,
+                logTag = logTag,
+                artifactUrl = artifactUrl,
+                version = version,
+            )
+        } finally {
+            lockedFiles.remove(file.absolutePathString())
+        }
+    }
+
+    private suspend fun downloadJarIfNotExistsUnderLock(
+        project: Project,
+        file: Path,
+        filename: String,
+        logTag: String,
+        artifactUrl: String,
+        version: String,
+    ): JarResult? {
         val response = client.prepareGet("$artifactUrl/$version/$filename").execute { httpResponse ->
             if (!httpResponse.status.isSuccess()) {
                 return@execute httpResponse
