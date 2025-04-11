@@ -17,6 +17,7 @@ import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
+import org.jetbrains.kotlin.tools.projectWizard.core.ignore
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap

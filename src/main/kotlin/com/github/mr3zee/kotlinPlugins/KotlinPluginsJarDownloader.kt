@@ -172,12 +172,13 @@ internal object KotlinPluginsJarDownloader {
         if (Files.exists(file)) {
             logger.debug("$logTag A file already exists: ${file.absolutePathString()}")
             return JarResult(file, version, downloaded = false)
-        } else {
-            Files.createFile(file)
         }
 
         return try {
+            // lock before creating
             lockedFiles[file.absolutePathString()] = Unit
+
+            Files.createFile(file)
 
             downloadJarIfNotExistsUnderLock(
                 project = project,
@@ -239,10 +240,11 @@ internal object KotlinPluginsJarDownloader {
                         httpResponse
                     }
                 }
-            } catch (e: CancellationException) {
-                logger.error("$logTag Cancellation while downloading file $filename", e)
-                throw e
             } catch (e: Exception) {
+                if (e is CancellationException) {
+                    throw e
+                }
+
                 logger.error("$logTag Exception while downloading file $filename", e)
                 null
             }
@@ -265,10 +267,11 @@ internal object KotlinPluginsJarDownloader {
     internal suspend fun downloadManifestAndGetVersions(logTag: String, artifactUrl: String): List<String>? {
         val response = try {
             client.get("$artifactUrl/maven-metadata.xml")
-        } catch (e: CancellationException) {
-            logger.error("$logTag Cancellation downloading the manifest", e)
-            throw e
         } catch (e: Exception) {
+            if (e is CancellationException) {
+                throw e
+            }
+
             logger.error("$logTag Exception downloading the manifest", e)
             return null
         }
