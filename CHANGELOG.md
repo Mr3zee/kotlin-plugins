@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- Rewrite file download lock
+- Fix the infinite download cycle
+
 ## [0.1.1] - 2025-04-11
 
 ### Fixed
