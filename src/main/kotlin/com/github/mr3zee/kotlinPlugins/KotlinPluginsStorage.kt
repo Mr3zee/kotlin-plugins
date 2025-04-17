@@ -1,6 +1,5 @@
 package com.github.mr3zee.kotlinPlugins
 
-import com.github.mr3zee.kotlinPlugins.KotlinPluginsJarDownloader.lockedFiles
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -17,15 +16,14 @@ import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
-import org.jetbrains.kotlin.tools.projectWizard.core.ignore
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
-import kotlin.io.path.absolutePathString
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
@@ -86,7 +84,8 @@ class KotlinPluginsStorageService(
     private val logger by lazy { thisLogger() }
 
     private val cacheMisses = ConcurrentHashMap<KotlinPluginDescriptor, ConcurrentHashMap<String, Boolean>>()
-    private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, ConcurrentHashMap<String, Path>>>()
+    private val pluginsCache =
+        ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, ConcurrentHashMap<String, Path>>>()
 
     private val runningActualizeJob = AtomicReference<Job?>(null)
 
@@ -213,6 +212,7 @@ class KotlinPluginsStorageService(
 
                             // no recalculation needed
                             pluginCacheMisses[libVersion] = true
+                            jar.requestedVersion?.let { pluginCacheMisses[it] = true }
 
                             pluginsCache.getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
                                 .getOrPut(plugin) { ConcurrentHashMap() }
@@ -284,7 +284,7 @@ class KotlinPluginsStorageService(
         logger.debug("Requested version is ${versioned.version} for ${versioned.descriptor}, located version: $locatedVersion, path: $path")
 
         val descriptorCacheMisses = cacheMisses.computeIfAbsent(versioned.descriptor) { ConcurrentHashMap() }
-        if (path == null || lockedFiles.contains(path.absolutePathString()) || locatedVersion != versioned.version) {
+        if (path == null || locatedVersion != versioned.version) {
             // cache miss, no requested version is present
             descriptorCacheMisses[versioned.version ?: CACHE_MISS_ANY_KEY] = false
             requestActualizePlugins(versioned)
@@ -313,18 +313,18 @@ class KotlinPluginsStorageService(
             .listDirectoryEntries("${versioned.descriptor.artifactId}-$kotlinVersion-*.jar")
             .toList()
 
+        logger.debug("Candidates for ${versioned.descriptor}:${versioned.version} -> ${candidates.map { it.fileName }}")
+
         if (versioned.version != null) {
-            candidates.find {
-                it.name.endsWith("-${versioned.version}-$FOR_IDE_CLASSIFIER.jar") ||
-                        it.name.endsWith("-${versioned.version}.jar")
-            }?.let { return versioned.version to it }
+            candidates
+                .find { it.name.endsWith("-${versioned.version}.jar") }
+                ?.let { return versioned.version to it }
         }
 
-        val versionToPath = candidates.filter { it.name.endsWith("-$FOR_IDE_CLASSIFIER.jar") }
+        val versionToPath = candidates
             .associateBy {
                 it.name
                     .substringAfter("${versioned.descriptor.artifactId}-$kotlinVersion-")
-                    .substringBefore("-$FOR_IDE_CLASSIFIER.jar")
                     .substringBefore(".jar")
             }
 
@@ -356,7 +356,7 @@ class KotlinPluginsStorageService(
 
             cacheMisses.clear()
             logger.debug("Invalidated KotlinCompilerPluginsProvider and cleared cache misses")
-        } catch (_ : ProcessCanceledException) {
+        } catch (_: ProcessCanceledException) {
             // fixes "Container 'ProjectImpl@341936598 services' was disposed"
         }
     }
