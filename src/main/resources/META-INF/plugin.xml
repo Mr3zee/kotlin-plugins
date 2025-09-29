@@ -24,4 +24,7 @@
                 description="Allows to clear the caches Kotlin plugins, so that the plugin can download the latest artifacts">
         </action>
     </actions>
+    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core" displayName="kotlinx-rpc"/>
+    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-core" displayName="kotlinx-rpc: kRPC"/>
+    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-core" displayName="kotlinx-rpc: gRPC"/>
 </idea-plugin>
