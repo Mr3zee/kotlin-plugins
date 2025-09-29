@@ -13,24 +13,24 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
 
     override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {
         logger.debug("Request for plugin jar: $userSuppliedPluginJar")
-        val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull() ?: return null
+        val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull(project) ?: return null
         logger.debug("Found plugin descriptor: $descriptor")
         return project.service<KotlinPluginsStorageService>().getPluginPath(descriptor).also {
             logger.debug("Returning plugin jar: $it")
         }
     }
 
-    private fun Path.toKotlinPluginDescriptorVersionedOrNull(): KotlinPluginDescriptorVersioned? {
-        val descriptor = toKotlinPluginDescriptorOrNull() ?: return null
+    private fun Path.toKotlinPluginDescriptorVersionedOrNull(project: Project): KotlinPluginDescriptorVersioned? {
+        val descriptor = toKotlinPluginDescriptorOrNull(project) ?: return null
         val coreVersion = SEMVER_REGEX.findAll(name).lastOrNull()?.value
         val version = coreVersion?.let { "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}" }
 
         return KotlinPluginDescriptorVersioned(descriptor, version)
     }
 
-    private fun Path.toKotlinPluginDescriptorOrNull(): KotlinPluginDescriptor? {
+    private fun Path.toKotlinPluginDescriptorOrNull(project: Project): KotlinPluginDescriptor? {
         val stringPath = toString()
-        val plugins = service<KotlinPluginsSettingsService>().state.plugins
+        val plugins = project.service<KotlinPluginsSettingsService>().state.asState().plugins
         return plugins.firstOrNull {
             val url = "${it.groupId}/${it.artifactId}/"
             stringPath.contains("/$url") || stringPath.startsWith(url)

@@ -16,6 +16,17 @@
         <bundledFirCompilerPluginProvider implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProvider"/>
         <supportsKotlinPluginMode supportsK1="false" supportsK2="true"/>
     </extensions>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <projectConfigurable
+                id="com.github.mr3zee.kotlinPlugins.settings"
+                parentId="tools"
+                displayName="Kotlin Plugins"
+                instance="com.github.mr3zee.kotlinPlugins.KotlinPluginsConfigurable"
+                nonDefaultProject="false"
+        />
+    </extensions>
+
     <actions>
         <action
                 id="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCacheAction"
@@ -24,7 +35,13 @@
                 description="Allows to clear the caches Kotlin plugins, so that the plugin can download the latest artifacts">
         </action>
     </actions>
-    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core" displayName="kotlinx-rpc"/>
-    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-core" displayName="kotlinx-rpc: kRPC"/>
-    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-core" displayName="kotlinx-rpc: gRPC"/>
+<!--    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core" displayName="kotlinx-rpc"/>-->
+<!--    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-core"-->
+<!--                       displayName="kotlinx-rpc: kRPC"/>-->
+<!--    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-core"-->
+<!--                       displayName="kotlinx-rpc: gRPC"/>-->
+<!--    TODO contact marketplace@jetbrains.com-->
+    <extensions defaultExtensionNs="com.intellij">
+        <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>
+    </extensions>
 </idea-plugin>

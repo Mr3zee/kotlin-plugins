@@ -169,7 +169,7 @@ class KotlinPluginsStorageService(
         val changed = AtomicBoolean(false)
         val nextJob = launchFetcher {
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
-            val plugins = service<KotlinPluginsSettingsService>().state.plugins
+            val plugins = project.service<KotlinPluginsSettingsService>().state.asState().plugins
 
             logger.debug("Actualize plugins job started (jar-fetcher-root), $kotlinIdeVersion: ${plugins.joinToString()}")
 
@@ -187,7 +187,7 @@ class KotlinPluginsStorageService(
                             withContext(Dispatchers.IO) {
                                 KotlinPluginsJarDownloader.downloadArtifactIfNotExists(
                                     project = project,
-                                    repoUrl = plugin.repoUrl,
+                                    repoUrl = plugin.repositories.first { it.type == KotlinArtifactsRepository.Type.URL }.value,
                                     groupId = plugin.groupId,
                                     artifactId = plugin.artifactId,
                                     kotlinIdeVersion = kotlinIdeVersion,
