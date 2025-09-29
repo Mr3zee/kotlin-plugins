@@ -197,6 +197,7 @@ internal object KotlinPluginsJarDownloader {
             return JarResult(finalFilename, version, requestedLibVersion, downloaded = false)
         }
 
+        @Suppress("BlockingMethodInNonBlockingContext")
         Files.createFile(file)
 
         return downloadJarIfNotExistsUnderLock(
@@ -273,6 +274,7 @@ internal object KotlinPluginsJarDownloader {
         }
 
         if (response?.status?.isSuccess() != true) {
+            @Suppress("BlockingMethodInNonBlockingContext")
             Files.delete(file)
             if (response != null) {
                 logger.debug("$logTag Failed to download file $artifactName: ${response.status} - ${response.bodyAsText()}")

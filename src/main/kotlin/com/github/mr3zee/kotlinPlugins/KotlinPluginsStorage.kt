@@ -1,3 +1,5 @@
+@file:Suppress("RemoveUnnecessaryParentheses")
+
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
@@ -229,7 +231,7 @@ class KotlinPluginsStorageService(
 
                 if (cacheMisses.flatMap { it.value.values }.any { !it }) {
                     logger.debug("Actualize plugins job self-launch: ${cacheMisses.entries.joinToString { (k, v) -> "{$k: [${v.entries.joinToString { (k1, v1) -> "[$k1 -> $v1]" }}]" }}")
-                    actualizePlugins()
+                    actualizeRequestQueue.trySend(Unit)
                 } else if (changed.get()) {
                     invalidateKotlinPluginsCache()
                 }
@@ -247,7 +249,7 @@ class KotlinPluginsStorageService(
         val map = pluginsCache.getOrPut(kotlinVersion) { ConcurrentHashMap() }
         val pluginMap = map.getOrPut(versioned.descriptor) { ConcurrentHashMap() }
 
-        val (locatedVersion, path) = if (versioned.version == null) {
+        val (locatedVersion, path) = (if (versioned.version == null) {
             findJarPath(versioned, kotlinVersion)?.also { (version, path) ->
                 pluginMap.compute(version) { _, old ->
                     when {
@@ -279,7 +281,7 @@ class KotlinPluginsStorageService(
                 versioned.version
             } to path
 
-        } ?: (null to null)
+        }) ?: (null to null)
 
         logger.debug("Requested version is ${versioned.version} for ${versioned.descriptor}, located version: $locatedVersion, path: $path")
 
