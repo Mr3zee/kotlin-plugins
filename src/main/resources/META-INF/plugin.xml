@@ -25,6 +25,43 @@
                 instance="com.github.mr3zee.kotlinPlugins.KotlinPluginsConfigurable"
                 nonDefaultProject="false"
         />
+
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core"
+                           displayName="kotlinx-rpc"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend"
+                           displayName="kotlinx-rpc: Compiler Plugin Backend"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2"
+                           displayName="kotlinx-rpc: Compiler Plugin K2"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-cli"
+                           displayName="kotlinx-rpc: Compiler Plugin CLI"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common"
+                           displayName="kotlinx-rpc: Compiler Plugin Common"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-core"
+                           displayName="kotlinx-rpc: kRPC Core"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-client"
+                           displayName="kotlinx-rpc: kRPC Client"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-server"
+                           displayName="kotlinx-rpc: kRPC Server"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-ktor-core"
+                           displayName="kotlinx-rpc: kRPC Ktor Core"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-ktor-client"
+                           displayName="kotlinx-rpc: kRPC Ktor Client"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-ktor-server"
+                           displayName="kotlinx-rpc: kRPC Ktor Server"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-core"
+                           displayName="kotlinx-rpc: gRPC Core"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-client"
+                           displayName="kotlinx-rpc: gRPC Client"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-server"
+                           displayName="kotlinx-rpc: gRPC Server"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-ktor-server"
+                           displayName="kotlinx-rpc: gRPC Ktor Server"/>
+        <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-protobuf-core"
+                           displayName="kotlinx-rpc: Protobuf Core"/>
+
+        <!--    TODO contact marketplace@jetbrains.com-->
+        <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>
+
     </extensions>
 
     <actions>
@@ -35,13 +72,4 @@
                 description="Allows to clear the caches Kotlin plugins, so that the plugin can download the latest artifacts">
         </action>
     </actions>
-<!--    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core" displayName="kotlinx-rpc"/>-->
-<!--    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-krpc-core"-->
-<!--                       displayName="kotlinx-rpc: kRPC"/>-->
-<!--    <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-grpc-core"-->
-<!--                       displayName="kotlinx-rpc: gRPC"/>-->
-<!--    TODO contact marketplace@jetbrains.com-->
-    <extensions defaultExtensionNs="com.intellij">
-        <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>
-    </extensions>
 </idea-plugin>
