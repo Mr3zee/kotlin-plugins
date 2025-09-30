@@ -8,6 +8,7 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.openapi.ui.emptyText
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
@@ -114,7 +115,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         tabs.addTab("Settings", content)
         rootPanel = JPanel(BorderLayout()).apply { add(tabs, BorderLayout.NORTH) }
 
-        reset() // initialize from persisted state
+        reset() // initialise from a persisted state
         return rootPanel as JPanel
     }
 
@@ -185,6 +186,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         }
     }
 
+    @Suppress("DuplicatedCode")
     private fun onRemoveRepository() {
         val idx = repoTable.selectedRow
         if (idx >= 0) {
@@ -231,6 +233,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         }
     }
 
+    @Suppress("DuplicatedCode")
     private fun onRemovePlugin() {
         val idx = pluginsTable.selectedRow
         if (idx >= 0) {
@@ -266,21 +269,28 @@ private class RepositoryDialog(
     }
 
     private val nameField = JBTextField(initial?.name.orEmpty()).apply {
+        emptyText.text = "Unique name"
+
         minimumSize = Dimension(300, minimumSize.height)
-        toolTipText = if (isDefault) "Default repository cannot be edited" else "Name must be unique"
+        toolTipText = if (isDefault) "Default repository name cannot be edited" else "Name must be unique"
     }
 
-    private val urlField = JBTextField(if (initial?.value?.startsWith("http") == true) initial.value else "").apply {
+    private val urlField = JBTextField().apply {
+        emptyText.text = "Maven repository URL"
+
+        text =  if (initial?.value?.startsWith("http") == true) initial.value else ""
         minimumSize = Dimension(600, minimumSize.height)
 
         if (isDefault) {
-            toolTipText = "Default repository cannot be edited"
+            toolTipText = "Default repository url cannot be edited"
         }
     }
 
     private val urlLabel = JBLabel("URL:")
 
     private val pathField = TextFieldWithBrowseButton().apply {
+        emptyText.text = "Maven artifacts directory"
+
         text = if (initial != null && !initial.value.startsWith("http")) initial.value else ""
         val descriptor = FileChooserDescriptorFactory
             .createSingleFolderDescriptor()
@@ -288,7 +298,7 @@ private class RepositoryDialog(
         addBrowseFolderListener(com.intellij.openapi.ui.TextBrowseFolderListener(descriptor, project))
 
         if (isDefault) {
-            toolTipText = "Default repository cannot be edited"
+            toolTipText = "Default repository path cannot be edited"
         }
     }
     private val pathLabel = JBLabel("Path:")
@@ -403,26 +413,34 @@ private class PluginsDialog(
 ) : DialogWrapper(true) {
     private val isDefault = initial?.name in DefaultState.pluginMap
 
-    private val warningLabel = JBLabel("Default repository cannot be edited", AllIcons.General.Warning, SwingConstants.LEADING).apply {
+    private val warningLabel = JBLabel("Default plugin can only have extra repositories", AllIcons.General.Warning, SwingConstants.LEADING).apply {
         foreground = JBUI.CurrentTheme.Label.warningForeground()
         isVisible = isDefault
         horizontalAlignment = SwingConstants.CENTER
     }
 
     private val nameField = JBTextField(initial?.name.orEmpty(), 30).apply {
+        emptyText.text = "Unique name"
+
         minimumSize = Dimension(300, minimumSize.height)
 
         toolTipText = if (isDefault) {
-            "Default repository cannot be edited"
+            "Default plugin name cannot be edited"
         } else {
             "Name must be unique"
         }
     }
 
-    private val idField = JBTextField(initial?.id.orEmpty(), 150).apply {
+    private val idField = JBTextField().apply {
+        emptyText.text = "Maven coordinates"
+
+        text = initial?.id.orEmpty()
+
         minimumSize = Dimension(600, minimumSize.height)
-        if (isDefault) {
-            toolTipText = "Default repository cannot be edited"
+        toolTipText = if (isDefault) {
+            "Default plugin coordinates cannot be edited"
+        } else {
+            "Must be in the form of group:artifact"
         }
     }
 
@@ -430,7 +448,7 @@ private class PluginsDialog(
         JBCheckBox(repo.name, initial?.repositories?.any { it.name == repo.name } == true).apply {
             toolTipText = repo.value
             if (isDefault) {
-                toolTipText += " (Default repository cannot be edited)"
+                toolTipText += " (Default plugin repository reference cannot be edited)"
             }
             isEnabled = !isDefault || DefaultState.pluginMap[initial?.name]!!.repositories.none { it.name == repo.name }
         }
@@ -459,7 +477,7 @@ private class PluginsDialog(
             .addComponent(warningLabel)
             .addLabeledComponent(JBLabel("Name:"), nameField)
             .addLabeledComponent(JBLabel("Coordinates:"), idField)
-            .addLabeledComponent(JBLabel("Repositories:"), reposPanel)
+            .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10)
             .panel
 
         form.preferredSize = Dimension(650, 0)

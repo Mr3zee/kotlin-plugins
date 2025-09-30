@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" version="1.0">
+    <xs:element name="defaults">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="repositories">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="repository" minOccurs="0" maxOccurs="unbounded" type="repository"/>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="plugins">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="plugin" minOccurs="0" maxOccurs="unbounded" type="plugin"/>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+        </xs:complexType>
+
+        <!-- key over repositories/repository -->
+        <xs:key name="repoId">
+            <xs:selector xpath="repositories/repository"/>
+            <xs:field xpath="@id"/>
+        </xs:key>
+
+        <!-- unique constraint over repository @name -->
+        <xs:unique name="repoNameUnique">
+            <xs:selector xpath="repositories/repository"/>
+            <xs:field xpath="@name"/>
+        </xs:unique>
+
+        <!-- keyref from plugins/plugin/repositoryRef/@id to repositories/repository/@id -->
+        <xs:keyref name="pluginRepositoryRef" refer="repoId">
+            <xs:selector xpath="plugins/plugin/repositoryRef"/>
+            <xs:field xpath="@id"/>
+        </xs:keyref>
+
+        <!-- unique constraint over plugin @name -->
+        <xs:unique name="pluginNameUnique">
+            <xs:selector xpath="plugins/plugin"/>
+            <xs:field xpath="@name"/>
+        </xs:unique>
+    </xs:element>
+
+    <xs:simpleType name="repositoryName">
+        <!-- forbid semicolon -->
+        <xs:restriction base="xs:string">
+            <xs:pattern value="[^;]*"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="repositoryValue">
+        <!-- forbid semicolon -->
+        <xs:restriction base="xs:string">
+            <xs:pattern value="[^;]*"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:complexType name="repository">
+        <xs:attribute name="id" type="xs:string" use="required"/>
+        <xs:attribute name="name" type="repositoryName" use="required"/>
+        <xs:attribute name="value" type="repositoryValue" use="required"/>
+        <xs:attribute name="type" type="repositoryType" use="required"/>
+    </xs:complexType>
+
+    <xs:simpleType name="repositoryType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="URL"/>
+            <xs:enumeration value="PATH"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:complexType name="plugin">
+        <xs:sequence>
+            <xs:element name="repositoryRef" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="id" type="xs:string" use="required"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+        <xs:attribute name="coordinates" type="xs:string" use="required"/>
+    </xs:complexType>
+</xs:schema>

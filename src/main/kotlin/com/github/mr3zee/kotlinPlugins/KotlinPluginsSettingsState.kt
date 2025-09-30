@@ -5,6 +5,8 @@ import com.intellij.openapi.components.SerializablePersistentStateComponent
 import com.intellij.openapi.components.SettingsCategory
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
+import com.intellij.openapi.project.Project
 import java.io.Serializable
 import kotlin.collections.distinctBy
 
@@ -17,13 +19,16 @@ import kotlin.collections.distinctBy
     category = SettingsCategory.PLUGINS,
     reloadable = true,
 )
-class KotlinPluginsSettingsService : SerializablePersistentStateComponent<KotlinPluginsSettingsService.StoredState>(
+class KotlinPluginsSettingsService(
+    private val project: Project,
+) : SerializablePersistentStateComponent<KotlinPluginsSettingsService.StoredState>(
     State(
         repositories = DefaultState.repositories,
         plugins = DefaultState.plugins,
     ).asStored()
 ) {
     init {
+        val current = state
         updateState {
             val asState = it.asState()
 
@@ -33,18 +38,27 @@ class KotlinPluginsSettingsService : SerializablePersistentStateComponent<Kotlin
 
             State(reposWithDefaults.toList(), pluginsWithDefaults.toList()).distinct().asStored()
         }
+        val new = state
+        if (current != new) {
+            project.service<KotlinPluginsStorageService>().clearCaches()
+        }
     }
 
     fun updateToNewState(
         repositories: List<KotlinArtifactsRepository>,
         plugins: List<KotlinPluginDescriptor>,
     ) {
+        val current = state
         updateState {
             // preserves the first entries, so default ones
             val reposWithDefaults = DefaultState.repositories + repositories
             val pluginsWithDefaults = DefaultState.plugins + plugins
 
             State(reposWithDefaults.toList(), pluginsWithDefaults.toList()).distinct().asStored()
+        }
+        val new = state
+        if (current != new) {
+            project.service<KotlinPluginsStorageService>().clearCaches()
         }
     }
 
@@ -145,54 +159,9 @@ interface DefaultStateEntry {
     val plugins: List<KotlinPluginDescriptor>
 }
 
-object DefaultState : DefaultStateEntry {
-    val defaults: List<DefaultStateEntry> = listOf(
-        KotlinxRpcDefaults,
-    )
-
-    override val repositories: List<KotlinArtifactsRepository> = defaults
-        .flatMap { it.repositories }
-        .distinctBy { it.name }
-
+object DefaultState : DefaultStateEntry by DefaultStateLoader.loadState() {
     val repositoryMap = repositories.associateBy { it.name }
-
-    override val plugins: List<KotlinPluginDescriptor> = defaults
-        .flatMap { it.plugins }
-        .distinctBy { it.name }
-
     val pluginMap = plugins.associateBy { it.name }
-}
-
-object KotlinxRpcDefaults : DefaultStateEntry {
-    const val REPO_URL = "https://maven.pkg.jetbrains.space/public/p/krpc/for-ide"
-
-    val devRepo = KotlinArtifactsRepository(
-        name = "kotlinx-rpc for IDE",
-        value = REPO_URL,
-        type = KotlinArtifactsRepository.Type.URL,
-    )
-
-    fun pluginDescriptor(suffix: String) = KotlinPluginDescriptor(
-        name = "kotlinx-rpc $suffix",
-        id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-$suffix",
-        repositories = listOf(devRepo),
-    )
-
-    val pluginDescriptorCli = pluginDescriptor("cli")
-    val pluginDescriptorK2 = pluginDescriptor("k2")
-    val pluginDescriptorBackend = pluginDescriptor("backend")
-    val pluginDescriptorCommon = pluginDescriptor("common")
-
-    override val repositories = listOf(
-        devRepo,
-    )
-
-    override val plugins = listOf(
-        pluginDescriptorCli,
-        pluginDescriptorK2,
-        pluginDescriptorBackend,
-        pluginDescriptorCommon,
-    )
 }
 
 data class KotlinPluginDescriptorVersioned(
