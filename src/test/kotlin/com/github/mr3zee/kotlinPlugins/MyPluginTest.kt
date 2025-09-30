@@ -78,4 +78,44 @@ class MyPluginTest : BasePlatformTestCase() {
         assertTrue(jarFile!!.exists())
         assertEquals(jarFile.toPath(), result?.path)
     }
+
+    fun testXmlLoading() {
+        val state = DefaultStateLoader.loadState()
+        val repository = KotlinArtifactsRepository(
+            name = "kotlinx-rpc for IDE",
+            value = "https://maven.pkg.jetbrains.space/public/p/krpc/for-ide",
+            type = KotlinArtifactsRepository.Type.URL,
+        )
+
+        assertContainsElements(
+            state.repositories,
+            listOf(repository),
+        )
+
+        assertContainsElements(
+            state.plugins,
+            listOf(
+                KotlinPluginDescriptor(
+                    name = "kotlinx-rpc cli",
+                    id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-cli",
+                    repositories = listOf(repository),
+                ),
+                KotlinPluginDescriptor(
+                    name = "kotlinx-rpc k2",
+                    id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2",
+                    repositories = listOf(repository),
+                ),
+                KotlinPluginDescriptor(
+                    name = "kotlinx-rpc backend",
+                    id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend",
+                    repositories = listOf(repository),
+                ),
+                KotlinPluginDescriptor(
+                    name = "kotlinx-rpc common",
+                    id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common",
+                    repositories = listOf(repository),
+                ),
+            ),
+        )
+    }
 }
