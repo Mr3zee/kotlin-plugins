@@ -7,6 +7,7 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.emptyText
 import com.intellij.ui.ToolbarDecorator
@@ -62,6 +63,10 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Coordinates") {
                 override fun valueOf(item: KotlinPluginDescriptor): String = item.id
             },
+            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Versions") {
+                override fun valueOf(item: KotlinPluginDescriptor): String =
+                    PluginsDialog.versionMatchingMapReversed.getValue(item.versionMatching)
+            },
             object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Repositories") {
                 override fun valueOf(item: KotlinPluginDescriptor): String =
                     item.repositories.joinToString(", ") { it.name }
@@ -70,7 +75,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         pluginsTable = TableView(pluginsModel).apply {
             columnModel.getColumn(0).preferredWidth = 100
             columnModel.getColumn(1).preferredWidth = 300
-            columnModel.getColumn(2).preferredWidth = 150
+            columnModel.getColumn(2).preferredWidth = 80
+            columnModel.getColumn(3).preferredWidth = 150
         }
         pluginsTable.emptyText.text = "No plugins configured"
 
@@ -120,7 +126,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     }
 
     override fun isModified(): Boolean {
-        val state = project.service<KotlinPluginsSettingsService>().state.asState()
+        val state = project.service<KotlinPluginsSettingsService>().safeState()
         val reposModified = repositoriesPairs().toSet() != state.repositories.map { it.name to it.value }.toSet()
         val pluginsModified = pluginsTriples().toSet() != state.plugins.map {
             Triple(
@@ -143,7 +149,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     }
 
     override fun reset() {
-        val state = project.service<KotlinPluginsSettingsService>().state.asState()
+        val state = project.service<KotlinPluginsSettingsService>().safeState()
         repositories.clear()
         repositories.addAll(state.repositories)
         repoModel.items = ArrayList(repositories)
@@ -262,11 +268,15 @@ private class RepositoryDialog(
 ) : DialogWrapper(true) {
     private val isDefault = initial?.name in DefaultState.repositoryMap
 
-    private val warningLabel = JBLabel("Default repository cannot be edited", AllIcons.General.Warning, SwingConstants.LEADING).apply {
-        foreground = JBUI.CurrentTheme.Label.warningForeground()
-        isVisible = isDefault
-        horizontalAlignment = SwingConstants.CENTER
-    }
+    private val warningLabel = JBLabel(
+        "Default repository cannot be edited",
+        AllIcons.General.Warning,
+        SwingConstants.LEADING,
+    ).apply {
+            foreground = JBUI.CurrentTheme.Label.warningForeground()
+            isVisible = isDefault
+            horizontalAlignment = SwingConstants.CENTER
+        }
 
     private val nameField = JBTextField(initial?.name.orEmpty()).apply {
         emptyText.text = "Unique name"
@@ -278,7 +288,7 @@ private class RepositoryDialog(
     private val urlField = JBTextField().apply {
         emptyText.text = "Maven repository URL"
 
-        text =  if (initial?.value?.startsWith("http") == true) initial.value else ""
+        text = if (initial?.value?.startsWith("http") == true) initial.value else ""
         minimumSize = Dimension(600, minimumSize.height)
 
         if (isDefault) {
@@ -413,7 +423,11 @@ private class PluginsDialog(
 ) : DialogWrapper(true) {
     private val isDefault = initial?.name in DefaultState.pluginMap
 
-    private val warningLabel = JBLabel("Default plugin can only have extra repositories", AllIcons.General.Warning, SwingConstants.LEADING).apply {
+    private val warningLabel = JBLabel(
+        "Default plugin name and coordinates cannot be edited, default repositories cannot be removed",
+        AllIcons.General.Warning,
+        SwingConstants.LEADING
+    ).apply {
         foreground = JBUI.CurrentTheme.Label.warningForeground()
         isVisible = isDefault
         horizontalAlignment = SwingConstants.CENTER
@@ -441,6 +455,14 @@ private class PluginsDialog(
             "Default plugin coordinates cannot be edited"
         } else {
             "Must be in the form of group:artifact"
+        }
+    }
+
+    // todo add comment component
+    private val versionMatchingField = ComboBox<String>().apply {
+        model = DefaultComboBoxModel(versionMatchingMap.keys.toTypedArray()).apply {
+            val value = initial?.versionMatching ?: KotlinPluginDescriptor.VersionMatching.EXACT
+            versionMatchingMapReversed[value]?.let { selectedItem = it }
         }
     }
 
@@ -477,6 +499,7 @@ private class PluginsDialog(
             .addComponent(warningLabel)
             .addLabeledComponent(JBLabel("Name:"), nameField)
             .addLabeledComponent(JBLabel("Coordinates:"), idField)
+            .addLabeledComponent(JBLabel("Version matching:"), versionMatchingField)
             .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10)
             .panel
 
@@ -512,6 +535,15 @@ private class PluginsDialog(
 
     companion object {
         private val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()
+
+        private val versionMatchingMap = mapOf(
+            "Latest Available" to KotlinPluginDescriptor.VersionMatching.LATEST,
+            "Same Major" to KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
+            "Exact" to KotlinPluginDescriptor.VersionMatching.EXACT,
+        )
+
+        val versionMatchingMapReversed = versionMatchingMap.entries
+            .associateBy({ it.value }) { it.key }
     }
 
     fun getResult(): KotlinPluginDescriptor? {
@@ -523,6 +555,11 @@ private class PluginsDialog(
             .filter { (_, box) -> box.isSelected }
             .map { (repo, _) -> repo }
 
-        return KotlinPluginDescriptor(nameField.text.trim(), idField.text.trim(), selectedRepos)
+        return KotlinPluginDescriptor(
+            name = nameField.text.trim(),
+            id = idField.text.trim(),
+            versionMatching = versionMatchingMap.getValue(versionMatchingField.model.selectedItem as String),
+            repositories = selectedRepos,
+        )
     }
 }

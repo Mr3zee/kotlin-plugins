@@ -73,6 +73,14 @@
         </xs:restriction>
     </xs:simpleType>
 
+    <xs:simpleType name="versionMatching">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="EXACT"/>
+            <xs:enumeration value="SAME_MAJOR"/>
+            <xs:enumeration value="LATEST"/>
+        </xs:restriction>
+    </xs:simpleType>
+
     <xs:complexType name="plugin">
         <xs:sequence>
             <xs:element name="repositoryRef" maxOccurs="unbounded">
@@ -83,5 +91,6 @@
         </xs:sequence>
         <xs:attribute name="name" type="xs:string" use="required"/>
         <xs:attribute name="coordinates" type="xs:string" use="required"/>
+        <xs:attribute name="versionMatching" type="versionMatching" use="required"/>
     </xs:complexType>
 </xs:schema>

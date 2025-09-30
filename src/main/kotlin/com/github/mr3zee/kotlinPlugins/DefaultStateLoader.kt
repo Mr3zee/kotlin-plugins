@@ -81,6 +81,13 @@ object DefaultStateLoader {
                 "plugin/@coordinates missing"
             }
 
+            val versionMatchingString = requireNotNull(pluginEl.getAttributeValue("versionMatching")) {
+                "plugin/@versionMatching missing"
+            }
+
+            val versionMatching = KotlinPluginDescriptor.VersionMatching.entries.find { it.name == versionMatchingString }
+                ?: error("Unknown versionMatching: $versionMatchingString for plugin $name")
+
             val repoRefs = pluginEl.getChildren("repositoryRef").map { refEl ->
                 val id = requireNotNull(refEl.getAttributeValue("id")) {
                     "repositoryRef/@id missing"
@@ -92,7 +99,8 @@ object DefaultStateLoader {
             KotlinPluginDescriptor(
                 name = name,
                 id = coordinates,
-                repositories = repoRefs
+                versionMatching = versionMatching,
+                repositories = repoRefs,
             )
         }
     }

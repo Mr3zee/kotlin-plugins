@@ -30,7 +30,7 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
 
     private fun Path.toKotlinPluginDescriptorOrNull(project: Project): KotlinPluginDescriptor? {
         val stringPath = toString()
-        val plugins = project.service<KotlinPluginsSettingsService>().state.asState().plugins
+        val plugins = project.service<KotlinPluginsSettingsService>().safeState().plugins
         return plugins.firstOrNull {
             val url = "${it.groupId}/${it.artifactId}/"
             stringPath.contains("/$url") || stringPath.startsWith(url)

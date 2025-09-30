@@ -7,7 +7,6 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
-import java.io.Serializable
 import kotlin.collections.distinctBy
 
 @Service(Service.Level.PROJECT)
@@ -27,20 +26,28 @@ class KotlinPluginsSettingsService(
         plugins = DefaultState.plugins,
     ).asStored()
 ) {
-    init {
-        val current = state
-        updateState {
-            val asState = it.asState()
-
-            // preserves the first entries, so default ones
-            val reposWithDefaults = DefaultState.repositories + asState.repositories
-            val pluginsWithDefaults = DefaultState.plugins + asState.plugins
-
-            State(reposWithDefaults.toList(), pluginsWithDefaults.toList()).distinct().asStored()
-        }
-        val new = state
-        if (current != new) {
+    private fun updateWithDetectChanges(updateFunction: (currentState: State) -> State): State {
+        val currentState = state
+        val newState = updateState {
+            updateFunction(currentState.asState()).asStored()
+        }.asState()
+        if (currentState != newState) {
             project.service<KotlinPluginsStorageService>().clearCaches()
+        }
+        return newState
+    }
+
+    init {
+        safeState()
+    }
+
+    fun safeState(): State {
+        return updateWithDetectChanges {
+            // preserves the first entries, so default ones
+            val reposWithDefaults = DefaultState.repositories + it.repositories
+            val pluginsWithDefaults = DefaultState.plugins + it.plugins
+
+            State(reposWithDefaults.toList(), pluginsWithDefaults.toList()).distinct()
         }
     }
 
@@ -48,17 +55,12 @@ class KotlinPluginsSettingsService(
         repositories: List<KotlinArtifactsRepository>,
         plugins: List<KotlinPluginDescriptor>,
     ) {
-        val current = state
-        updateState {
+        updateWithDetectChanges {
             // preserves the first entries, so default ones
             val reposWithDefaults = DefaultState.repositories + repositories
             val pluginsWithDefaults = DefaultState.plugins + plugins
 
-            State(reposWithDefaults.toList(), pluginsWithDefaults.toList()).distinct().asStored()
-        }
-        val new = state
-        if (current != new) {
-            project.service<KotlinPluginsStorageService>().clearCaches()
+            State(reposWithDefaults.toList(), pluginsWithDefaults.toList()).distinct()
         }
     }
 
@@ -71,7 +73,7 @@ class KotlinPluginsSettingsService(
         @JvmField
         val repositories: Map<String, String> = emptyMap(),
         @JvmField
-        val pluginsCoordinates: Map<String, String> = emptyMap(),
+        val plugins: Map<String, String> = emptyMap(),
         @JvmField
         val pluginsRepos: Map<String, String> = emptyMap(),
     )
@@ -88,19 +90,27 @@ data class KotlinArtifactsRepository(
 data class KotlinPluginDescriptor(
     val name: String,
     val id: String,
+    val versionMatching: VersionMatching,
     val repositories: List<KotlinArtifactsRepository> = emptyList(),
-) : Serializable {
+) {
     val groupId: String get() = id.substringBefore(':')
     val artifactId: String get() = id.substringAfter(':')
+
+    enum class VersionMatching {
+        EXACT,
+        SAME_MAJOR,
+        LATEST,
+    }
 }
 
 private fun KotlinPluginsSettingsService.State.distinct(): KotlinPluginsSettingsService.State {
     val distinctRepositories = repositories.distinctBy { it.name }
     val distinctRepositoriesNames = distinctRepositories.map { it.name }.toSet()
 
-    // default plugins can have updated repos
+    // default plugins can have updated repos and version matching
     val updatedDefaultPlugins = plugins.filter {
-        it.name in DefaultState.pluginMap && it.repositories != DefaultState.pluginMap[it.name]!!.repositories
+        val defaultPlugin = DefaultState.pluginMap[it.name]
+        defaultPlugin != null && (it.repositories != defaultPlugin.repositories || it.versionMatching != defaultPlugin.versionMatching)
     }.associateBy { it.name }.mapValues { (k, v) ->
         v.copy(
             repositories = (DefaultState.pluginMap[k]!!.repositories + v.repositories).distinctBy { it.name },
@@ -129,7 +139,7 @@ private fun KotlinPluginsSettingsService.State.asStored(): KotlinPluginsSettings
         repositories = repositories.associateBy { it.name }.mapValues { (_, v) ->
             "${v.value};${v.type.name}"
         },
-        pluginsCoordinates = plugins.associateBy { it.name }.mapValues { it.value.id },
+        plugins = plugins.associateBy { it.name }.mapValues { "${it.value.id};${it.value.versionMatching.name}" },
         pluginsRepos = plugins.associateBy { it.name }.mapValues { (_, v) -> v.repositories.joinToString(";") { it.name } },
     )
 }
@@ -148,8 +158,19 @@ fun KotlinPluginsSettingsService.StoredState.asState(): KotlinPluginsSettingsSer
 
     return KotlinPluginsSettingsService.State(
         repositories = mappedRepos,
-        plugins = pluginsCoordinates.mapNotNull { (k, v) ->
-            KotlinPluginDescriptor(k, v, pluginsRepos[k].orEmpty().split(";").mapNotNull { repoByNames[it] })
+        plugins = plugins.mapNotNull { (k, v) ->
+            val list = v.split(";")
+            val coordinates = list.getOrNull(0) ?: return@mapNotNull null
+            val versionMatching = list.getOrNull(1)?.let { enumName ->
+                KotlinPluginDescriptor.VersionMatching.entries.find { it.name == enumName }
+            } ?: return@mapNotNull null
+
+            KotlinPluginDescriptor(
+                name = k,
+                id = coordinates,
+                versionMatching = versionMatching,
+                repositories = pluginsRepos[k].orEmpty().split(";").mapNotNull { repoByNames[it] }
+            )
         },
     )
 }

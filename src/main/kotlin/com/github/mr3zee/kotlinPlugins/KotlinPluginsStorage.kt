@@ -169,7 +169,7 @@ class KotlinPluginsStorageService(
         val changed = AtomicBoolean(false)
         val nextJob = launchFetcher {
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
-            val plugins = project.service<KotlinPluginsSettingsService>().state.asState().plugins
+            val plugins = project.service<KotlinPluginsSettingsService>().safeState().plugins
 
             logger.debug("Actualize plugins job started (jar-fetcher-root), $kotlinIdeVersion: ${plugins.joinToString()}")
 

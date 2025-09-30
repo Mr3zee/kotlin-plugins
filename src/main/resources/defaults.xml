@@ -4,16 +4,16 @@
         <repository id="kxrpc-for-ide" name="kotlinx-rpc for IDE" value="https://maven.pkg.jetbrains.space/public/p/krpc/for-ide" type="URL"/>
     </repositories>
     <plugins>
-        <plugin name="kotlinx-rpc cli" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-cli">
+        <plugin name="kotlinx-rpc cli" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-cli" versionMatching="EXACT">
             <repositoryRef id="kxrpc-for-ide"/>
         </plugin>
-        <plugin name="kotlinx-rpc k2" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2">
+        <plugin name="kotlinx-rpc k2" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2" versionMatching="EXACT">
             <repositoryRef id="kxrpc-for-ide"/>
         </plugin>
-        <plugin name="kotlinx-rpc backend" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend">
+        <plugin name="kotlinx-rpc backend" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend" versionMatching="EXACT">
             <repositoryRef id="kxrpc-for-ide"/>
         </plugin>
-        <plugin name="kotlinx-rpc common" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common">
+        <plugin name="kotlinx-rpc common" coordinates="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common" versionMatching="EXACT">
             <repositoryRef id="kxrpc-for-ide"/>
         </plugin>
     </plugins>

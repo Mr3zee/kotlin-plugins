@@ -98,21 +98,25 @@ class MyPluginTest : BasePlatformTestCase() {
                 KotlinPluginDescriptor(
                     name = "kotlinx-rpc cli",
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-cli",
+                    versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
                 ),
                 KotlinPluginDescriptor(
                     name = "kotlinx-rpc k2",
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2",
+                    versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
                 ),
                 KotlinPluginDescriptor(
                     name = "kotlinx-rpc backend",
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend",
+                    versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
                 ),
                 KotlinPluginDescriptor(
                     name = "kotlinx-rpc common",
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common",
+                    versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
                 ),
             ),
