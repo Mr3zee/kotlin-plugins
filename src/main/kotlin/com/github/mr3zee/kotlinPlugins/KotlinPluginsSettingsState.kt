@@ -94,8 +94,8 @@ data class KotlinPluginDescriptor(
     val enabled: Boolean,
     val repositories: List<KotlinArtifactsRepository> = emptyList(),
 ) {
-    val groupId: String get() = id.substringBefore(':')
-    val artifactId: String get() = id.substringAfter(':')
+    val groupId: String by lazy { id.substringBefore(':') }
+    val artifactId: String by lazy { id.substringAfter(':') }
 
     enum class VersionMatching {
         EXACT,
@@ -196,5 +196,5 @@ object DefaultState : DefaultStateEntry by DefaultStateLoader.loadState() {
 
 data class KotlinPluginDescriptorVersioned(
     val descriptor: KotlinPluginDescriptor,
-    val version: String?,
+    val version: String,
 )

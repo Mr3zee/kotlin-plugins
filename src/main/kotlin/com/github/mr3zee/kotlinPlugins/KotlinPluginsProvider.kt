@@ -23,7 +23,13 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     private fun Path.toKotlinPluginDescriptorVersionedOrNull(project: Project): KotlinPluginDescriptorVersioned? {
         val descriptor = toKotlinPluginDescriptorOrNull(project) ?: return null
         val coreVersion = SEMVER_REGEX.findAll(name).lastOrNull()?.value
-        val version = coreVersion?.let { "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}" }
+            ?: run {
+                logger.error("Couldn't find core version in plugin jar name: $name")
+                return null
+            }
+
+        // coreVersion (0.1.0) -> version (0.1.0-dev-123)
+        val version = "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}"
 
         return KotlinPluginDescriptorVersioned(descriptor, version)
     }
@@ -31,7 +37,8 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     private fun Path.toKotlinPluginDescriptorOrNull(project: Project): KotlinPluginDescriptor? {
         val stringPath = toString()
         val plugins = project.service<KotlinPluginsSettingsService>().safeState().plugins
-        return plugins.firstOrNull {
+
+        return plugins.filter { it.enabled }.firstOrNull {
             val url = "${it.groupId}/${it.artifactId}/"
             stringPath.contains("/$url") || stringPath.startsWith(url)
         }

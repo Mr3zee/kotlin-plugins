@@ -44,15 +44,36 @@ class MyPluginTest : BasePlatformTestCase() {
             "1.9.24-0.2.2-dev-1",
             "1.9.24-0.2.2-dev-2",
             "1.9.24-0.2.3-dev-1",
+            "1.9.24-0.5.0-dev-1",
             "1.9.25-0.5.0-dev-1",
         )
-        assertEquals("1.9.24-0.2.3-dev-1", getLatestVersion(versions, "1.9.24"))
+
+        val exact = MatchFilter(
+            matching = KotlinPluginDescriptor.VersionMatching.EXACT,
+            version = "0.2.3-dev-1",
+        )
+
+        val sameMajor = MatchFilter(
+            matching = KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
+            version = "0.2.2",
+        )
+
+        val latest = MatchFilter(
+            matching = KotlinPluginDescriptor.VersionMatching.LATEST,
+            version = "0.2.3",
+        )
+
+        assertEquals("1.9.24-0.2.3-dev-1", getMatching(versions, "1.9.24", exact))
+        assertEquals("1.9.24-0.2.3-dev-1", getMatching(versions, "1.9.24", sameMajor))
+        assertEquals("1.9.24-0.5.0-dev-1", getMatching(versions, "1.9.24", latest))
     }
 
     fun testManifestDownload() = runBlocking {
-        val versions = KotlinPluginsJarDownloader.downloadManifestAndGetVersions(
+        val versions = KotlinPluginJarLocator.locateManifestAndGetVersions(
             "[testManifestDownload]",
-            "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin",
+            KotlinPluginJarLocator.ArtifactManifest.Locator.ByUrl(
+                "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin"
+            ),
         ) ?: return@runBlocking fail("Failed to download manifest")
 
         assertContainsElements(
@@ -63,15 +84,27 @@ class MyPluginTest : BasePlatformTestCase() {
 
     fun testDownloadJar() = runBlocking {
         val tempFile = Files.createTempDirectory("testDownloadJar")
-        val result = KotlinPluginsJarDownloader.downloadArtifactIfNotExists(
+        val result = KotlinPluginJarLocator.locateArtifact(
             project = project,
-            repoUrl = "https://maven.pkg.jetbrains.space/public/p/krpc/maven",
-            groupId = "org.jetbrains.kotlinx",
-            artifactId = "kotlinx-rpc-compiler-plugin",
+            versioned = KotlinPluginDescriptorVersioned(
+                descriptor = KotlinPluginDescriptor(
+                    name = "[testDownloadJar]",
+                    id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin",
+                    versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
+                    enabled = true,
+                    repositories = listOf(
+                        KotlinArtifactsRepository(
+                            name = "[testDownloadJar]",
+                            value = "https://maven.pkg.jetbrains.space/public/p/krpc/maven",
+                            type = KotlinArtifactsRepository.Type.URL,
+                        )
+                    ),
+                ),
+                version = "0.2.2-dev-1",
+            ),
             kotlinIdeVersion = "1.9.24",
             dest = tempFile,
-            optionalPreferredLibVersions = { emptySet() },
-        ).firstOrNull()
+        )
 
         val jarFile = tempFile.toFile().listFiles()?.firstOrNull()
         assertNotNull(jarFile)
@@ -100,24 +133,28 @@ class MyPluginTest : BasePlatformTestCase() {
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-cli",
                     versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
+                    enabled = true,
                 ),
                 KotlinPluginDescriptor(
                     name = "kotlinx-rpc k2",
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2",
                     versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
+                    enabled = true,
                 ),
                 KotlinPluginDescriptor(
                     name = "kotlinx-rpc backend",
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend",
                     versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
+                    enabled = true,
                 ),
                 KotlinPluginDescriptor(
                     name = "kotlinx-rpc common",
                     id = "org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common",
                     versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
+                    enabled = true,
                 ),
             ),
         )
