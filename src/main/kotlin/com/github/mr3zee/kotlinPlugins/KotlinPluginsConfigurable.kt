@@ -57,7 +57,10 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             columnModel.getColumn(0).preferredWidth = 100
             columnModel.getColumn(1).preferredWidth = 300
             emptyText.text = "No repositories configured"
-            rowSorter = TableRowSorter(repoModel)
+            rowSorter = TableRowSorter(repoModel).apply {
+                setSortable(0, true)
+                setSortable(1, false)
+            }
         }
 
         pluginsModel = ListTableModel(
@@ -96,7 +99,13 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             columnModel.getColumn(3).preferredWidth = 80
             columnModel.getColumn(4).preferredWidth = 150
             emptyText.text = "No plugins configured"
-            rowSorter = TableRowSorter(pluginsModel)
+            rowSorter = TableRowSorter(pluginsModel).apply {
+                setSortable(0, false)
+                setSortable(1, true)
+                setSortable(2, true)
+                setSortable(3, false)
+                setSortable(4, false)
+            }
         }
 
         val repoPanel = ToolbarDecorator.createDecorator(repoTable)
