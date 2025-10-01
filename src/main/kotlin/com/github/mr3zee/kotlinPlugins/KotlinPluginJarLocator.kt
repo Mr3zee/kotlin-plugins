@@ -36,7 +36,7 @@ data class JarResult(
 )
 
 internal object KotlinPluginJarLocator {
-    private val logger by lazy { KotlinPluginJarLocator.thisLogger() }
+    private val logger by lazy { thisLogger() }
 
     private val client by lazy {
         HttpClient(OkHttp) {
@@ -58,11 +58,11 @@ internal object KotlinPluginJarLocator {
         val kotlinIdeVersion: String,
     ) {
         sealed interface Locator {
-            class ByUrl(
+            data class ByUrl(
                 val url: String,
             ) : Locator
 
-            class ByPath(
+            data class ByPath(
                 val path: Path,
             ) : Locator
         }
@@ -76,6 +76,8 @@ internal object KotlinPluginJarLocator {
     ): JarResult? {
         val descriptor = versioned.descriptor
         val logTag = "[${descriptor.id}:${logId.andIncrement}]"
+
+        logger.debug("$logTag Locating artifact for $kotlinIdeVersion")
 
         var first: JarResult? = null
         descriptor.repositories.forEach {
@@ -104,9 +106,10 @@ internal object KotlinPluginJarLocator {
                 kotlinIdeVersion = kotlinIdeVersion,
             )
 
-            logger.debug("$logTag Checking the latest version for $kotlinIdeVersion from ${manifest.locator}")
+            logger.debug("$logTag Accessing manifest from ${manifest.locator}")
 
-            val versions = locateManifestAndGetVersions(logTag, locator) ?: return null
+            val versions = locateManifestAndGetVersions(logTag, locator, kotlinIdeVersion)
+                ?: return null
 
             logger.debug("$logTag Found ${versions.size} versions for $kotlinIdeVersion: $versions")
 
@@ -360,11 +363,12 @@ internal object KotlinPluginJarLocator {
     internal suspend fun locateManifestAndGetVersions(
         logTag: String,
         artifactUrl: ArtifactManifest.Locator,
+        kotlinIdeVersion: String,
     ): List<String>? {
         return when (artifactUrl) {
             is ArtifactManifest.Locator.ByUrl -> locateManifestAndGetVersions(logTag, artifactUrl)
             is ArtifactManifest.Locator.ByPath -> locateManifestAndGetVersions(logTag, artifactUrl)
-        }
+        }?.filter { it.startsWith(kotlinIdeVersion) }
     }
 
     internal suspend fun locateManifestAndGetVersions(

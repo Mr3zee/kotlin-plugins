@@ -59,6 +59,7 @@ class KotlinPluginsStorageService(
 
     fun clearCaches() {
         scope.launch(CoroutineName("clear-caches")) {
+            logger.debug("Clearing caches")
             try {
                 while (true) {
                     actualizerJobs.values.forEach { it.cancelAndJoin() }
@@ -131,14 +132,14 @@ class KotlinPluginsStorageService(
         attempt: Int = 1,
     ) {
         if (attempt > 3) {
-            logger.debug("Actualize plugins job failed after ${attempt - 1} attempts")
+            logger.debug("Actualize plugins job failed after ${attempt - 1} attempts (${plugin.descriptor.name}, ${plugin.descriptor.id})")
             return
         }
 
         val descriptor = plugin.descriptor
         val currentJob = actualizerJobs[plugin]
         if (currentJob != null && currentJob.isActive) {
-            logger.debug("Actualize plugins job is already running")
+            logger.debug("Actualize plugins job is already running (${plugin.descriptor.name}, ${plugin.descriptor.id})")
             return
         }
 
@@ -153,7 +154,7 @@ class KotlinPluginsStorageService(
                 ?.resolve(descriptor.getPluginGroupPath())
                 ?: return@launchActualizer
 
-            logger.debug("Actualize plugins job started ${descriptor.groupId}-${descriptor.artifactId}")
+            logger.debug("Actualize plugins job started (${plugin.descriptor.name}, ${plugin.descriptor.id})")
 
             val jarResult = runCatching {
                 withContext(Dispatchers.IO) {
@@ -196,6 +197,7 @@ class KotlinPluginsStorageService(
                     if (failed) {
                         scope.actualize(plugin, attempt + 1)
                     } else if (changed.get()) {
+                        logger.debug("Actualize plugins job self restart (${plugin.descriptor.name}, ${plugin.descriptor.id})")
                         invalidateKotlinPluginsCache()
                     }
                 }
@@ -233,7 +235,10 @@ class KotlinPluginsStorageService(
             versioned.version
         }
 
-        logger.debug("Requested version is ${versioned.version} for ${versioned.descriptor}, located version: $locatedVersion, path: $path")
+        logger.debug(
+            "Requested version is ${versioned.version} for ${versioned.descriptor.name} (${versioned.descriptor.id}), " +
+                    "located version: $locatedVersion, path: $path"
+        )
 
         if (path == null || locatedVersion != versioned.version) {
             // no requested version is present
@@ -295,7 +300,7 @@ class KotlinPluginsStorageService(
                 provider.dispose() // clear Kotlin plugin caches
             }
 
-            logger.debug("Invalidated KotlinCompilerPluginsProvider and cleared cache misses")
+            logger.debug("Invalidated KotlinCompilerPluginsProvider")
         } catch (_: ProcessCanceledException) {
             // fixes "Container 'ProjectImpl@341936598 services' was disposed"
         }

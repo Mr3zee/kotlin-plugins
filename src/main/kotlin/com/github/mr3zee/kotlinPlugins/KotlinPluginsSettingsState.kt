@@ -6,6 +6,7 @@ import com.intellij.openapi.components.SettingsCategory
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import kotlin.collections.distinctBy
 
@@ -26,18 +27,24 @@ class KotlinPluginsSettingsService(
         plugins = DefaultState.plugins,
     ).asStored()
 ) {
+    private val logger by lazy { thisLogger() }
+
     private fun updateWithDetectChanges(updateFunction: (currentState: State) -> State): State {
         val currentState = state
+
         val newState = updateState {
             updateFunction(currentState.asState()).asStored()
-        }.asState()
+        }
+
         if (currentState != newState) {
             project.service<KotlinPluginsStorageService>().clearCaches()
         }
-        return newState
+
+        return newState.asState()
     }
 
     init {
+        logger.debug("Initializing Kotlin Plugins Settings Service")
         safeState()
     }
 
