@@ -77,10 +77,6 @@ object DefaultStateLoader {
                 "plugin/@name missing"
             }
 
-            val coordinates = requireNotNull(pluginEl.getAttributeValue("coordinates")) {
-                "plugin/@coordinates missing"
-            }
-
             val versionMatchingString = requireNotNull(pluginEl.getAttributeValue("versionMatching")) {
                 "plugin/@versionMatching missing"
             }
@@ -96,9 +92,21 @@ object DefaultStateLoader {
                 repositoriesById[id] ?: error("Unknown repositoryRef id: $id for plugin $name")
             }
 
+            val ids = pluginEl.getChildren("artifact").mapNotNull { idEl ->
+                val coordinates = requireNotNull(idEl.getAttributeValue("coordinates")) {
+                    "plugin/@coordinates missing"
+                }
+
+                if (mavenRegex.matches(coordinates)) {
+                    MavenId(coordinates)
+                } else {
+                    null
+                }
+            }
+
             KotlinPluginDescriptor(
                 name = name,
-                id = coordinates,
+                ids = ids,
                 versionMatching = versionMatching,
                 repositories = repoRefs,
                 enabled = true,

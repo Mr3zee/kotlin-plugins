@@ -28,9 +28,16 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.readText
 
-data class JarResult(
+class BundleResult(
+    val jars: Map<MavenId, JarResult?>,
+) {
+    fun allFound() = jars.all { it.value != null }
+}
+
+class JarResult(
     val path: Path,
     val libVersion: String,
+    val artifactId: String,
     val artifactVersion: String,
     val isNew: Boolean,
 )
@@ -68,41 +75,63 @@ internal object KotlinPluginJarLocator {
         }
     }
 
+    suspend fun locateArtifacts(
+        project: Project,
+        versioned: VersionedKotlinPluginDescriptor,
+        kotlinIdeVersion: String,
+        dest: Path,
+    ): BundleResult {
+        val logTag = "[${versioned.descriptor.name}:${logId.andIncrement}]"
+
+        logger.debug("$logTag Locating artifact for $kotlinIdeVersion")
+
+        return BundleResult(
+            jars = versioned.descriptor.ids.associateWith { mavenId ->
+                locateArtifact(
+                    project = project,
+                    logTag = logTag,
+                    versioned = RequestedKotlinPluginDescriptor(versioned.descriptor, versioned.version, mavenId),
+                    kotlinIdeVersion = kotlinIdeVersion,
+                    dest = dest,
+                )
+            }
+        )
+    }
+
     suspend fun locateArtifact(
         project: Project,
-        versioned: KotlinPluginDescriptorVersioned,
+        logTag: String,
+        versioned: RequestedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
         dest: Path,
     ): JarResult? {
         val descriptor = versioned.descriptor
-        val logTag = "[${descriptor.id}:${logId.andIncrement}]"
-
-        logger.debug("$logTag Locating artifact for $kotlinIdeVersion")
-
+        val artifact = versioned.artifact
         var first: JarResult? = null
+
         descriptor.repositories.forEach {
             val locator = when (it.type) {
                 KotlinArtifactsRepository.Type.URL -> {
-                    val groupUrl = descriptor.groupId.replace(".", "/")
-                    val artifactUrl = "${it.value}/$groupUrl/${descriptor.artifactId}"
+                    val groupUrl = artifact.groupId.replace(".", "/")
+                    val artifactUrl = "${it.value}/$groupUrl/${artifact.artifactId}"
 
                     ArtifactManifest.Locator.ByUrl(artifactUrl)
                 }
 
                 KotlinArtifactsRepository.Type.PATH -> {
-                    val list = descriptor.groupId.split(".")
+                    val list = artifact.groupId.split(".")
                     val groupPath = Path(list.first(), *list.drop(1).toTypedArray())
-                    val artifactPath = Path(it.value).resolve(groupPath).resolve(descriptor.artifactId)
+                    val artifactPath = Path(it.value).resolve(groupPath).resolve(artifact.artifactId)
 
                     ArtifactManifest.Locator.ByPath(artifactPath)
                 }
             }
 
             val manifest = ArtifactManifest(
-                artifactId = descriptor.artifactId,
+                artifactId = artifact.artifactId,
                 locator = locator,
                 matchFilter = versioned.asMatchFilter(),
-                dest = dest,
+                dest = dest.resolve(artifact.getPluginGroupPath()),
                 kotlinIdeVersion = kotlinIdeVersion,
             )
 
@@ -188,7 +217,13 @@ internal object KotlinPluginJarLocator {
             val finalFilename = path.removeDownloadingExtension()
             Files.move(path, finalFilename, StandardCopyOption.ATOMIC_MOVE)
 
-            JarResult(finalFilename, libVersion, artifactVersion, isNew = true)
+            JarResult(
+                path = finalFilename,
+                libVersion = libVersion,
+                artifactId = artifactId,
+                artifactVersion = artifactVersion,
+                isNew = true,
+            )
         } else {
             this
         }
@@ -216,7 +251,13 @@ internal object KotlinPluginJarLocator {
         val finalFilename = file.removeDownloadingExtension()
         if (Files.exists(finalFilename)) {
             logger.debug("$logTag A file already exists: ${finalFilename.absolutePathString()}")
-            return JarResult(finalFilename, libVersion, artifactVersion, isNew = false)
+            return JarResult(
+                path = finalFilename,
+                libVersion = libVersion,
+                artifactId = manifest.artifactId,
+                artifactVersion = artifactVersion,
+                isNew = false
+            )
         }
 
         @Suppress("BlockingMethodInNonBlockingContext")
@@ -226,7 +267,7 @@ internal object KotlinPluginJarLocator {
             project = project,
             file = file,
             logTag = logTag,
-            locator = manifest.locator,
+            manifest = manifest,
             artifactName = artifactName,
             artifactVersion = artifactVersion,
             libVersion = libVersion,
@@ -241,28 +282,30 @@ internal object KotlinPluginJarLocator {
         project: Project,
         file: Path,
         logTag: String,
-        locator: ArtifactManifest.Locator,
+        manifest: ArtifactManifest,
         artifactName: String,
         artifactVersion: String,
         libVersion: String,
     ): JarResult? {
-        return when (locator) {
+        return when (manifest.locator) {
             is ArtifactManifest.Locator.ByUrl -> locateNewArtifact(
                 project = project,
                 file = file,
                 logTag = logTag,
-                artifactUrl = locator.url,
+                artifactUrl = manifest.locator.url,
                 artifactName = artifactName,
                 artifactVersion = artifactVersion,
+                artifactId = manifest.artifactId,
                 libVersion = libVersion,
             )
 
             is ArtifactManifest.Locator.ByPath -> locateNewArtifact(
                 file = file,
                 logTag = logTag,
-                artifactPath = locator.path,
+                artifactPath = manifest.locator.path,
                 artifactName = artifactName,
                 artifactVersion = artifactVersion,
+                artifactId = manifest.artifactId,
                 libVersion = libVersion,
             )
         }
@@ -275,6 +318,7 @@ internal object KotlinPluginJarLocator {
         artifactUrl: String,
         artifactName: String,
         artifactVersion: String,
+        artifactId: String,
         libVersion: String,
     ): JarResult? {
         val response = client.prepareGet("$artifactUrl/$artifactVersion/$artifactName").execute { httpResponse ->
@@ -337,7 +381,13 @@ internal object KotlinPluginJarLocator {
 
         logger.debug("$logTag File downloaded successfully")
 
-        return JarResult(file, libVersion, artifactVersion, isNew = true)
+        return JarResult(
+            path = file,
+            libVersion = libVersion,
+            artifactId = artifactId,
+            artifactVersion = artifactVersion,
+            isNew = true,
+        )
     }
 
     private fun locateNewArtifact(
@@ -346,6 +396,7 @@ internal object KotlinPluginJarLocator {
         artifactPath: Path,
         artifactName: String,
         artifactVersion: String,
+        artifactId: String,
         libVersion: String,
     ): JarResult? {
         val jarPath = artifactPath.resolve(artifactVersion).resolve(artifactName)
@@ -357,7 +408,13 @@ internal object KotlinPluginJarLocator {
 
         Files.copy(jarPath, file, StandardCopyOption.REPLACE_EXISTING)
 
-        return JarResult(file, libVersion, artifactVersion, isNew = true)
+        return JarResult(
+            path = file,
+            libVersion = libVersion,
+            artifactId = artifactId,
+            artifactVersion = artifactVersion,
+            isNew = true,
+        )
     }
 
     internal suspend fun locateManifestAndGetVersions(
@@ -420,7 +477,7 @@ class MatchFilter(
     val matching: KotlinPluginDescriptor.VersionMatching,
 )
 
-fun KotlinPluginDescriptorVersioned.asMatchFilter(): MatchFilter {
+fun RequestedKotlinPluginDescriptor.asMatchFilter(): MatchFilter {
     return MatchFilter(version, descriptor.versionMatching)
 }
 

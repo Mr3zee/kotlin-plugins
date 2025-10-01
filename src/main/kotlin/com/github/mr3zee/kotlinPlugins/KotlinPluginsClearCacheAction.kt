@@ -7,7 +7,7 @@ import com.intellij.openapi.components.service
 
 class KotlinPluginsClearCacheAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
-        e.project?.service<KotlinPluginsStorageService>()?.clearCaches()
+        e.project?.service<KotlinPluginsStorage>()?.clearCaches()
     }
 
     override fun getActionUpdateThread(): ActionUpdateThread {

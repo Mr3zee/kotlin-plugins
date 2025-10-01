@@ -2,13 +2,13 @@ package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.components.service
-import com.intellij.openapi.options.Configurable
-import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.emptyText
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.components.JBCheckBox
@@ -24,7 +24,6 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import javax.swing.*
 import javax.swing.table.TableRowSorter
-import kotlin.collections.map
 
 class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     private val repositories: MutableList<KotlinArtifactsRepository> = mutableListOf()
@@ -80,7 +79,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 override fun valueOf(item: KotlinPluginDescriptor): String = item.name
             },
             object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Coordinates") {
-                override fun valueOf(item: KotlinPluginDescriptor): String = item.id
+                override fun valueOf(item: KotlinPluginDescriptor): String =
+                    item.ids.joinToString("<br/>", prefix = "<html>", postfix = "</html>") { it.id }
             },
             object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Versions") {
                 override fun valueOf(item: KotlinPluginDescriptor): String =
@@ -88,7 +88,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             },
             object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Repositories") {
                 override fun valueOf(item: KotlinPluginDescriptor): String =
-                    item.repositories.joinToString(", ") { it.name }
+                    item.repositories.joinToString("<br/>", prefix = "<html>", postfix = "</html>") { it.name }
             }
         )
 
@@ -158,15 +158,16 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     }
 
     override fun isModified(): Boolean {
-        val state = project.service<KotlinPluginsSettingsService>().safeState()
+        val state = project.service<KotlinPluginsSettings>().safeState()
         val reposModified = repositories != state.repositories
-        val pluginsModified = plugins != state.plugins || pluginsEnabled != state.plugins.associateBy({ it.name }, { it.enabled })
+        val pluginsModified =
+            plugins != state.plugins || pluginsEnabled != state.plugins.associateBy({ it.name }, { it.enabled })
 
         return reposModified || pluginsModified
     }
 
     override fun apply() {
-        val service = project.service<KotlinPluginsSettingsService>()
+        val service = project.service<KotlinPluginsSettings>()
 
         val enabledPlugins = plugins.map {
             it.copy(enabled = pluginsEnabled[it.name] ?: it.enabled)
@@ -176,7 +177,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     }
 
     override fun reset() {
-        val state = project.service<KotlinPluginsSettingsService>().safeState()
+        val state = project.service<KotlinPluginsSettings>().safeState()
         repositories.clear()
         repositories.addAll(state.repositories)
         repoModel.items = ArrayList(repositories)
@@ -315,10 +316,10 @@ private class RepositoryDialog(
         AllIcons.General.Warning,
         SwingConstants.LEADING,
     ).apply {
-            foreground = JBUI.CurrentTheme.Label.warningForeground()
-            isVisible = isDefault
-            horizontalAlignment = SwingConstants.CENTER
-        }
+        foreground = JBUI.CurrentTheme.Label.warningForeground()
+        isVisible = isDefault
+        horizontalAlignment = SwingConstants.CENTER
+    }
 
     private val nameField = JBTextField(initial?.name.orEmpty()).apply {
         emptyText.text = "Unique name"
@@ -489,20 +490,58 @@ private class PluginsDialog(
         }
     }
 
-    private val idField = JBTextField().apply {
-        emptyText.text = "Maven coordinates"
+    private val mutableIds: ArrayList<String> = ArrayList(initial?.ids.orEmpty().map { it.id })
 
-        text = initial?.id.orEmpty()
+    private val idsModel = ListTableModel<IndexedValue<String>>(
+        object : com.intellij.util.ui.ColumnInfo<IndexedValue<String>, String>("") {
+            override fun valueOf(item: IndexedValue<String>): String = mutableIds[item.index]
+            override fun isCellEditable(item: IndexedValue<String>?): Boolean = !isDefault
+            override fun setValue(item: IndexedValue<String>, value: String) {
+                mutableIds[item.index] = value
+            }
+        },
+    ).apply {
+        items = mutableIds.withIndex().toList()
+    }
+
+    private val idsTable = JBTable().apply {
+        emptyText.text = "No Maven coordinates"
+
+        model = idsModel
 
         minimumSize = Dimension(600, minimumSize.height)
         toolTipText = if (isDefault) {
             "Default plugin coordinates cannot be edited"
         } else {
-            "Must be in the form of group:artifact"
+            "Each entry must be in the form of 'group:artifact'"
         }
     }
 
-    // todo add comment component
+    val tablePanel = ToolbarDecorator.createDecorator(idsTable).apply {
+        setAddActionUpdater { !isDefault }
+        setRemoveActionUpdater { !isDefault }
+        setMoveUpAction(null)
+        setMoveDownAction(null)
+
+        setAddAction {
+            if (isDefault) {
+                return@setAddAction
+            }
+
+            mutableIds.add("")
+            idsModel.items = mutableIds.withIndex().toList()
+        }
+
+        setRemoveAction {
+            if (isDefault) {
+                return@setRemoveAction
+            }
+
+            mutableIds.removeAt(idsTable.selectedRow)
+            idsModel.items = mutableIds.withIndex().toList()
+        }
+    }.createPanel()
+
     private val versionMatchingField = ComboBox<String>().apply {
         model = DefaultComboBoxModel(versionMatchingMap.keys.toTypedArray()).apply {
             val value = initial?.versionMatching ?: KotlinPluginDescriptor.VersionMatching.EXACT
@@ -531,9 +570,9 @@ private class PluginsDialog(
         title = if (initial == null) "Add Plugin" else "Edit Plugin"
 
         nameField.isEditable = !isDefault
-        idField.isEditable = !isDefault
 
         init()
+        initValidation()
     }
 
     override fun createCenterPanel(): JComponent {
@@ -544,7 +583,7 @@ private class PluginsDialog(
         val form = FormBuilder.createFormBuilder()
             .addComponent(warningLabel)
             .addLabeledComponent(JBLabel("Name:"), nameField)
-            .addLabeledComponent(JBLabel("Coordinates:"), idField)
+            .addLabeledComponent(JBLabel("Coordinates:"), tablePanel)
             .addLabeledComponent(JBLabel("Version matching:"), versionMatchingField)
             .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10)
             .addComponent(enabledCheckbox)
@@ -564,25 +603,24 @@ private class PluginsDialog(
             return ValidationInfo("Name must be unique", nameField)
         }
 
-        val id = idField.text.trim()
-        if (id.isEmpty()) {
-            return ValidationInfo("Coordinates must not be empty", idField)
+        if (mutableIds.isEmpty()) {
+            return ValidationInfo("At least one Maven coordinate must be specified")
         }
 
-        if (!mavenRegex.matches(id)) {
-            return ValidationInfo("Coordinates must be in the form group:artifact", idField)
+        mutableIds.forEach { id ->
+            if (!mavenRegex.matches(id)) {
+                return ValidationInfo("Coordinates must be in the form group:artifact")
+            }
         }
 
         if (repoCheckboxes.none { it.isSelected }) {
-            return ValidationInfo("Select at least one URL repository", reposContainer)
+            return ValidationInfo("Select at least one URL repository")
         }
 
         return null
     }
 
     companion object {
-        private val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()
-
         private val versionMatchingMap = mapOf(
             "Latest Available" to KotlinPluginDescriptor.VersionMatching.LATEST,
             "Same Major" to KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
@@ -604,10 +642,12 @@ private class PluginsDialog(
 
         return KotlinPluginDescriptor(
             name = nameField.text.trim(),
-            id = idField.text.trim(),
+            ids = mutableIds.map { MavenId( it) },
             versionMatching = versionMatchingMap.getValue(versionMatchingField.model.selectedItem as String),
             enabled = enabledCheckbox.isSelected,
             repositories = selectedRepos,
         )
     }
 }
+
+val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()

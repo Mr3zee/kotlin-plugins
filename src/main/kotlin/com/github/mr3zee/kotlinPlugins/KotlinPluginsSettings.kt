@@ -8,6 +8,7 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import java.nio.file.Path
 import kotlin.collections.distinctBy
 
 @Service(Service.Level.PROJECT)
@@ -19,9 +20,9 @@ import kotlin.collections.distinctBy
     category = SettingsCategory.PLUGINS,
     reloadable = true,
 )
-class KotlinPluginsSettingsService(
+class KotlinPluginsSettings(
     private val project: Project,
-) : SerializablePersistentStateComponent<KotlinPluginsSettingsService.StoredState>(
+) : SerializablePersistentStateComponent<KotlinPluginsSettings.StoredState>(
     State(
         repositories = DefaultState.repositories,
         plugins = DefaultState.plugins,
@@ -37,7 +38,7 @@ class KotlinPluginsSettingsService(
         }
 
         if (currentState != newState) {
-            project.service<KotlinPluginsStorageService>().clearCaches()
+            project.service<KotlinPluginsStorage>().clearCaches()
         }
 
         return newState.asState()
@@ -96,14 +97,11 @@ data class KotlinArtifactsRepository(
 
 data class KotlinPluginDescriptor(
     val name: String,
-    val id: String,
+    val ids: List<MavenId>,
     val versionMatching: VersionMatching,
     val enabled: Boolean,
-    val repositories: List<KotlinArtifactsRepository> = emptyList(),
+    val repositories: List<KotlinArtifactsRepository>,
 ) {
-    val groupId: String by lazy { id.substringBefore(':') }
-    val artifactId: String by lazy { id.substringAfter(':') }
-
     enum class VersionMatching {
         EXACT,
         SAME_MAJOR,
@@ -111,7 +109,17 @@ data class KotlinPluginDescriptor(
     }
 }
 
-private fun KotlinPluginsSettingsService.State.distinct(): KotlinPluginsSettingsService.State {
+data class MavenId(val id: String) {
+    val groupId: String = id.substringBefore(":")
+    val artifactId: String = id.substringAfter(":")
+
+    fun getPluginGroupPath(): Path {
+        val group = groupId.split(".")
+        return Path.of(group[0], *group.drop(1).toTypedArray())
+    }
+}
+
+private fun KotlinPluginsSettings.State.distinct(): KotlinPluginsSettings.State {
     val distinctRepositories = repositories.distinctBy { it.name }
     val distinctRepositoriesNames = distinctRepositories.map { it.name }.toSet()
 
@@ -144,13 +152,13 @@ private fun KotlinPluginsSettingsService.State.distinct(): KotlinPluginsSettings
     )
 }
 
-private fun KotlinPluginsSettingsService.State.asStored(): KotlinPluginsSettingsService.StoredState {
-    return KotlinPluginsSettingsService.StoredState(
+private fun KotlinPluginsSettings.State.asStored(): KotlinPluginsSettings.StoredState {
+    return KotlinPluginsSettings.StoredState(
         repositories = repositories.associateBy { it.name }.mapValues { (_, v) ->
             "${v.value};${v.type.name}"
         },
-        plugins = plugins.associateBy { it.name }.mapValues {
-            "${it.value.id};${it.value.versionMatching.name};${it.value.enabled}"
+        plugins = plugins.associateBy { it.name }.mapValues { (_, v) ->
+            "${v.versionMatching.name};${v.enabled};${v.ids.joinToString(";") { it.id }}"
         },
         pluginsRepos = plugins.associateBy { it.name }.mapValues { (_, v) ->
             v.repositories.joinToString(";") { it.name }
@@ -158,7 +166,7 @@ private fun KotlinPluginsSettingsService.State.asStored(): KotlinPluginsSettings
     )
 }
 
-fun KotlinPluginsSettingsService.StoredState.asState(): KotlinPluginsSettingsService.State {
+fun KotlinPluginsSettings.StoredState.asState(): KotlinPluginsSettings.State {
     val mappedRepos = repositories.mapNotNull { (k, v) ->
         val list = v.split(";")
         val value = list.getOrNull(0) ?: return@mapNotNull null
@@ -170,22 +178,26 @@ fun KotlinPluginsSettingsService.StoredState.asState(): KotlinPluginsSettingsSer
 
     val repoByNames = mappedRepos.associateBy { it.name }
 
-    return KotlinPluginsSettingsService.State(
+    return KotlinPluginsSettings.State(
         repositories = mappedRepos,
-        plugins = plugins.mapNotNull { (k, v) ->
+        plugins = plugins.mapNotNull { (name, v) ->
             val list = v.split(";")
-            val coordinates = list.getOrNull(0) ?: return@mapNotNull null
-            val versionMatching = list.getOrNull(1)?.let { enumName ->
+            val versionMatching = list.getOrNull(0)?.let { enumName ->
                 KotlinPluginDescriptor.VersionMatching.entries.find { it.name == enumName }
             } ?: return@mapNotNull null
-            val enabled = list.getOrNull(2)?.toBooleanStrictOrNull() ?: return@mapNotNull null
+            val enabled = list.getOrNull(1)?.toBooleanStrictOrNull() ?: return@mapNotNull null
+            val coordinates = list.drop(2).mapNotNull {
+                if (mavenRegex.matches(it)) {
+                    MavenId(it)
+                } else null
+            }
 
             KotlinPluginDescriptor(
-                name = k,
-                id = coordinates,
+                name = name,
+                ids = coordinates,
                 versionMatching = versionMatching,
                 enabled = enabled,
-                repositories = pluginsRepos[k].orEmpty().split(";").mapNotNull { repoByNames[it] }
+                repositories = pluginsRepos[name].orEmpty().split(";").mapNotNull { repoByNames[it] }
             )
         },
     )
@@ -201,7 +213,13 @@ object DefaultState : DefaultStateEntry by DefaultStateLoader.loadState() {
     val pluginMap = plugins.associateBy { it.name }
 }
 
-data class KotlinPluginDescriptorVersioned(
-    val descriptor: KotlinPluginDescriptor,
-    val version: String,
+open class VersionedKotlinPluginDescriptor(
+    open val descriptor: KotlinPluginDescriptor,
+    open val version: String,
 )
+
+class RequestedKotlinPluginDescriptor(
+    descriptor: KotlinPluginDescriptor,
+    version: String,
+    val artifact: MavenId,
+) : VersionedKotlinPluginDescriptor(descriptor, version)

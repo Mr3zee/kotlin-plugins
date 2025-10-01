@@ -83,6 +83,11 @@
 
     <xs:complexType name="plugin">
         <xs:sequence>
+            <xs:element name="artifact" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="coordinates" type="xs:string" use="required"/>
+                </xs:complexType>
+            </xs:element>
             <xs:element name="repositoryRef" maxOccurs="unbounded">
                 <xs:complexType>
                     <xs:attribute name="id" type="xs:string" use="required"/>
@@ -90,7 +95,6 @@
             </xs:element>
         </xs:sequence>
         <xs:attribute name="name" type="xs:string" use="required"/>
-        <xs:attribute name="coordinates" type="xs:string" use="required"/>
         <xs:attribute name="versionMatching" type="versionMatching" use="required"/>
     </xs:complexType>
 </xs:schema>

@@ -14,35 +14,38 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {
         logger.debug("Request for plugin jar: $userSuppliedPluginJar")
         val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull(project) ?: return null
-        logger.debug("Found plugin descriptor: ${descriptor.descriptor.name} (${descriptor.descriptor.id})")
-        return project.service<KotlinPluginsStorageService>().getPluginPath(descriptor).also {
+        logger.debug("Found plugin descriptor: ${descriptor.descriptor.name}")
+        return project.service<KotlinPluginsStorage>().getPluginPath(descriptor).also {
             logger.debug("Returning plugin jar: $it")
         }
     }
 
-    private fun Path.toKotlinPluginDescriptorVersionedOrNull(project: Project): KotlinPluginDescriptorVersioned? {
-        val descriptor = toKotlinPluginDescriptorOrNull(project) ?: return null
-        val coreVersion = SEMVER_REGEX.findAll(name).lastOrNull()?.value
-            ?: run {
-                logger.error("Couldn't find core version in plugin jar name: $name")
-                return null
+    private fun Path.toKotlinPluginDescriptorVersionedOrNull(project: Project): RequestedKotlinPluginDescriptor? {
+        val stringPath = toString()
+        val plugins = project.service<KotlinPluginsSettings>().safeState().plugins
+
+        return plugins.filter { it.enabled }.firstNotNullOfOrNull { descriptor ->
+            val urls = descriptor.ids.map { it to "${it.groupId}/${it.artifactId}/" }
+
+            urls.firstOrNull { (_, url) ->
+                stringPath.contains("/$url") || stringPath.startsWith(url)
+            }?.let { (id, _) ->
+                val coreVersion = SEMVER_REGEX.findAll(name).lastOrNull()?.value
+                    ?: run {
+                        logger.error("Couldn't find core version in plugin jar name: $name")
+                        return null
+                    }
+
+                // coreVersion (0.1.0) -> version (0.1.0-dev-123)
+                val version = "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}"
+
+                RequestedKotlinPluginDescriptor(descriptor, version, id)
             }
-
-        // coreVersion (0.1.0) -> version (0.1.0-dev-123)
-        val version = "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}"
-
-        return KotlinPluginDescriptorVersioned(descriptor, version)
+        }
     }
 
-    private fun Path.toKotlinPluginDescriptorOrNull(project: Project): KotlinPluginDescriptor? {
-        val stringPath = toString()
-        val plugins = project.service<KotlinPluginsSettingsService>().safeState().plugins
-
-        return plugins.filter { it.enabled }.firstOrNull {
-            val url = "${it.groupId}/${it.artifactId}/"
-            stringPath.contains("/$url") || stringPath.startsWith(url)
-        }
+    companion object {
+        private val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
     }
 }
 
-private val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
