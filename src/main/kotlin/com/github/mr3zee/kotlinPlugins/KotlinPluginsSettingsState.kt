@@ -91,6 +91,7 @@ data class KotlinPluginDescriptor(
     val name: String,
     val id: String,
     val versionMatching: VersionMatching,
+    val enabled: Boolean,
     val repositories: List<KotlinArtifactsRepository> = emptyList(),
 ) {
     val groupId: String get() = id.substringBefore(':')
@@ -107,10 +108,12 @@ private fun KotlinPluginsSettingsService.State.distinct(): KotlinPluginsSettings
     val distinctRepositories = repositories.distinctBy { it.name }
     val distinctRepositoriesNames = distinctRepositories.map { it.name }.toSet()
 
-    // default plugins can have updated repos and version matching
+    // default plugins can't have updated names or coordinates
     val updatedDefaultPlugins = plugins.filter {
         val defaultPlugin = DefaultState.pluginMap[it.name]
-        defaultPlugin != null && (it.repositories != defaultPlugin.repositories || it.versionMatching != defaultPlugin.versionMatching)
+        defaultPlugin != null && (it.repositories != defaultPlugin.repositories ||
+                it.versionMatching != defaultPlugin.versionMatching ||
+                it.enabled != defaultPlugin.enabled)
     }.associateBy { it.name }.mapValues { (k, v) ->
         v.copy(
             repositories = (DefaultState.pluginMap[k]!!.repositories + v.repositories).distinctBy { it.name },
@@ -139,8 +142,12 @@ private fun KotlinPluginsSettingsService.State.asStored(): KotlinPluginsSettings
         repositories = repositories.associateBy { it.name }.mapValues { (_, v) ->
             "${v.value};${v.type.name}"
         },
-        plugins = plugins.associateBy { it.name }.mapValues { "${it.value.id};${it.value.versionMatching.name}" },
-        pluginsRepos = plugins.associateBy { it.name }.mapValues { (_, v) -> v.repositories.joinToString(";") { it.name } },
+        plugins = plugins.associateBy { it.name }.mapValues {
+            "${it.value.id};${it.value.versionMatching.name};${it.value.enabled}"
+        },
+        pluginsRepos = plugins.associateBy { it.name }.mapValues { (_, v) ->
+            v.repositories.joinToString(";") { it.name }
+        },
     )
 }
 
@@ -164,11 +171,13 @@ fun KotlinPluginsSettingsService.StoredState.asState(): KotlinPluginsSettingsSer
             val versionMatching = list.getOrNull(1)?.let { enumName ->
                 KotlinPluginDescriptor.VersionMatching.entries.find { it.name == enumName }
             } ?: return@mapNotNull null
+            val enabled = list.getOrNull(2)?.toBooleanStrictOrNull() ?: return@mapNotNull null
 
             KotlinPluginDescriptor(
                 name = k,
                 id = coordinates,
                 versionMatching = versionMatching,
+                enabled = enabled,
                 repositories = pluginsRepos[k].orEmpty().split(";").mapNotNull { repoByNames[it] }
             )
         },

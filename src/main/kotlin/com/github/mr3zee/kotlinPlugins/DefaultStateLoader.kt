@@ -101,6 +101,7 @@ object DefaultStateLoader {
                 id = coordinates,
                 versionMatching = versionMatching,
                 repositories = repoRefs,
+                enabled = true,
             )
         }
     }

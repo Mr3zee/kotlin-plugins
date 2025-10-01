@@ -16,21 +16,23 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBRadioButton
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
-import com.intellij.ui.table.TableView
+import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.ListTableModel
 import java.awt.BorderLayout
 import java.awt.Dimension
 import javax.swing.*
+import javax.swing.table.TableRowSorter
 import kotlin.collections.map
 
 class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     private val repositories: MutableList<KotlinArtifactsRepository> = mutableListOf()
     private val plugins: MutableList<KotlinPluginDescriptor> = mutableListOf()
+    private val pluginsEnabled: MutableMap<String, Boolean> = mutableMapOf()
 
-    private lateinit var repoTable: TableView<KotlinArtifactsRepository>
-    private lateinit var pluginsTable: TableView<KotlinPluginDescriptor>
+    private lateinit var repoTable: JBTable
+    private lateinit var pluginsTable: JBTable
     private lateinit var repoModel: ListTableModel<KotlinArtifactsRepository>
     private lateinit var pluginsModel: ListTableModel<KotlinPluginDescriptor>
 
@@ -50,13 +52,27 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 override fun valueOf(item: KotlinArtifactsRepository): String = item.value
             }
         )
-        repoTable = TableView(repoModel).apply {
+
+        repoTable = JBTable(repoModel).apply {
             columnModel.getColumn(0).preferredWidth = 100
             columnModel.getColumn(1).preferredWidth = 300
+            emptyText.text = "No repositories configured"
+            rowSorter = TableRowSorter(repoModel)
         }
-        repoTable.emptyText.text = "No repositories configured"
 
         pluginsModel = ListTableModel(
+            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, Boolean>("") {
+                @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+                override fun getColumnClass(): Class<*> = java.lang.Boolean::class.java
+
+                override fun valueOf(item: KotlinPluginDescriptor): Boolean = pluginsEnabled[item.name] ?: item.enabled
+
+                override fun isCellEditable(item: KotlinPluginDescriptor?): Boolean = true
+
+                override fun setValue(item: KotlinPluginDescriptor, value: Boolean) {
+                    pluginsEnabled[item.name] = value
+                }
+            },
             object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Name") {
                 override fun valueOf(item: KotlinPluginDescriptor): String = item.name
             },
@@ -72,21 +88,26 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                     item.repositories.joinToString(", ") { it.name }
             }
         )
-        pluginsTable = TableView(pluginsModel).apply {
-            columnModel.getColumn(0).preferredWidth = 100
-            columnModel.getColumn(1).preferredWidth = 300
-            columnModel.getColumn(2).preferredWidth = 80
-            columnModel.getColumn(3).preferredWidth = 150
+
+        pluginsTable = JBTable(pluginsModel).apply {
+            columnModel.getColumn(0).preferredWidth = 20
+            columnModel.getColumn(1).preferredWidth = 100
+            columnModel.getColumn(2).preferredWidth = 300
+            columnModel.getColumn(3).preferredWidth = 80
+            columnModel.getColumn(4).preferredWidth = 150
+            emptyText.text = "No plugins configured"
+            rowSorter = TableRowSorter(pluginsModel)
         }
-        pluginsTable.emptyText.text = "No plugins configured"
 
         val repoPanel = ToolbarDecorator.createDecorator(repoTable)
             .setAddAction { onAddRepository() }
             .setEditAction { onEditRepository() }
             .setRemoveAction { onRemoveRepository() }
             .setRemoveActionUpdater {
-                val selected = repoTable.selectedObject
-                selected != null && selected.name !in DefaultState.repositoryMap
+                repoTable.selectedRows.none {
+                    val modelIndex = repoTable.convertRowIndexToModel(it)
+                    repoModel.getItem(modelIndex) !in DefaultState.repositories
+                }
             }
             .createPanel()
 
@@ -95,8 +116,10 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             .setEditAction { onEditPlugin() }
             .setRemoveAction { onRemovePlugin() }
             .setRemoveActionUpdater {
-                val selected = pluginsTable.selectedObject
-                selected != null && selected.name !in DefaultState.pluginMap
+                pluginsTable.selectedRows.none {
+                    val modelIndex = pluginsTable.convertRowIndexToModel(it)
+                    pluginsModel.getItem(modelIndex) !in DefaultState.plugins
+                }
             }
             .createPanel()
 
@@ -127,25 +150,20 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
     override fun isModified(): Boolean {
         val state = project.service<KotlinPluginsSettingsService>().safeState()
-        val reposModified = repositoriesPairs().toSet() != state.repositories.map { it.name to it.value }.toSet()
-        val pluginsModified = pluginsTriples().toSet() != state.plugins.map {
-            Triple(
-                it.name,
-                it.id,
-                it.repositories.map { r -> r.name }
-            )
-        }.toSet()
+        val reposModified = repositories != state.repositories
+        val pluginsModified = plugins != state.plugins || pluginsEnabled != state.plugins.associateBy({ it.name }, { it.enabled })
+
         return reposModified || pluginsModified
     }
-
-    private fun repositoriesPairs(): List<Pair<String, String>> = repositories.map { it.name to it.value }
-    private fun pluginsTriples(): List<Triple<String, String, List<String>>> =
-        plugins.map { Triple(it.name, it.id, it.repositories.map { r -> r.name }) }
 
     override fun apply() {
         val service = project.service<KotlinPluginsSettingsService>()
 
-        service.updateToNewState(repositories, plugins)
+        val enabledPlugins = plugins.map {
+            it.copy(enabled = pluginsEnabled[it.name] ?: it.enabled)
+        }
+
+        service.updateToNewState(repositories, enabledPlugins)
     }
 
     override fun reset() {
@@ -156,6 +174,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
         plugins.clear()
         plugins.addAll(state.plugins)
+        pluginsEnabled.clear()
+        pluginsEnabled.putAll(state.plugins.associateBy({ it.name }, { it.enabled }))
         pluginsModel.items = ArrayList(plugins)
     }
 
@@ -176,7 +196,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     }
 
     private fun onEditRepository() {
-        val selected = repoTable.selectedObject ?: return
+        val selected = repoTable.selectedObject(repoModel) ?: return
         val idx = repoTable.selectedRow
         val dialog = RepositoryDialog(
             currentNames = repositories.map { it.name },
@@ -212,28 +232,32 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             currentNames = plugins.map { it.name },
             availableRepositories = repositories,
             initial = null,
+            enabledInitial = true,
         )
 
         if (dialog.showAndGet()) {
             val entry = dialog.getResult() ?: return
             plugins.add(entry)
+            pluginsEnabled[entry.name] = entry.enabled
             pluginsModel.items = ArrayList(plugins)
             selectLast(pluginsTable)
         }
     }
 
     private fun onEditPlugin() {
-        val selected = pluginsTable.selectedObject ?: return
+        val selected = pluginsTable.selectedObject(pluginsModel) ?: return
         val idx = pluginsTable.selectedRow
         val dialog = PluginsDialog(
             currentNames = plugins.map { it.name },
             availableRepositories = repositories,
             initial = selected,
+            enabledInitial = pluginsEnabled[selected.name] ?: selected.enabled,
         )
 
         if (dialog.showAndGet()) {
             val updated = dialog.getResult() ?: return
             plugins[idx] = updated
+            pluginsEnabled[updated.name] = updated.enabled
             pluginsModel.items = ArrayList(plugins)
             pluginsTable.selectionModel.setSelectionInterval(idx, idx)
         }
@@ -248,16 +272,25 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 return
             }
             plugins.removeAt(idx)
+            pluginsEnabled.remove(plugin.name)
             pluginsModel.items = ArrayList(plugins)
         }
     }
     // endregion
 
-    private fun selectLast(table: TableView<*>) {
+    private fun selectLast(table: JBTable) {
         val last = table.rowCount - 1
         if (last >= 0) {
             table.selectionModel.setSelectionInterval(last, last)
         }
+    }
+
+    private fun <T : Any> JBTable.selectedObject(model: ListTableModel<T>): T? {
+        val rowIndex = convertRowIndexToModel(selectedRow)
+        if (rowIndex == -1) {
+            return null
+        }
+        return model.getItem(rowIndex)
     }
 }
 
@@ -381,6 +414,7 @@ private class RepositoryDialog(
                 return ValidationInfo("URL must not be empty", urlField)
             }
 
+            @Suppress("HttpUrlsUsage")
             if (!(url.startsWith("http://") || url.startsWith("https://"))) {
                 return ValidationInfo("URL should start with http:// or https://", urlField)
             }
@@ -420,6 +454,7 @@ private class PluginsDialog(
     private val currentNames: List<String>,
     private val availableRepositories: List<KotlinArtifactsRepository>,
     private val initial: KotlinPluginDescriptor?,
+    enabledInitial: Boolean,
 ) : DialogWrapper(true) {
     private val isDefault = initial?.name in DefaultState.pluginMap
 
@@ -466,6 +501,8 @@ private class PluginsDialog(
         }
     }
 
+    private val enabledCheckbox = JBCheckBox("Enable this plugin in the project", enabledInitial)
+
     private val repoCheckboxes: List<JBCheckBox> = availableRepositories.map { repo ->
         JBCheckBox(repo.name, initial?.repositories?.any { it.name == repo.name } == true).apply {
             toolTipText = repo.value
@@ -501,6 +538,7 @@ private class PluginsDialog(
             .addLabeledComponent(JBLabel("Coordinates:"), idField)
             .addLabeledComponent(JBLabel("Version matching:"), versionMatchingField)
             .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10)
+            .addComponent(enabledCheckbox)
             .panel
 
         form.preferredSize = Dimension(650, 0)
@@ -559,6 +597,7 @@ private class PluginsDialog(
             name = nameField.text.trim(),
             id = idField.text.trim(),
             versionMatching = versionMatchingMap.getValue(versionMatchingField.model.selectedItem as String),
+            enabled = enabledCheckbox.isSelected,
             repositories = selectedRepos,
         )
     }
