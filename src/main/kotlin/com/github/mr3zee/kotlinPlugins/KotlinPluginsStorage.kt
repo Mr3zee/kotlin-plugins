@@ -53,7 +53,7 @@ class KotlinPluginsStorage(
     private val logger by lazy { thisLogger() }
 
     private val pluginsCache =
-        ConcurrentHashMap<String, ConcurrentHashMap<KotlinPluginDescriptor, ConcurrentHashMap<ResolvedPlugin, Path>>>()
+        ConcurrentHashMap<String, ConcurrentHashMap<String, ConcurrentHashMap<ResolvedPlugin, Path>>>()
 
     fun clearCaches() {
         scope.launch(CoroutineName("clear-caches")) {
@@ -70,7 +70,7 @@ class KotlinPluginsStorage(
                 actualizerJobs.clear()
 
                 pluginsCache.clear()
-                invalidateKotlinPluginsCache()
+                invalidateKotlinPluginCache()
 
                 cacheDir()?.let {
                     @OptIn(ExperimentalPathApi::class)
@@ -93,7 +93,10 @@ class KotlinPluginsStorage(
                         logger.debug("Scheduled actualize job started")
 
                         pluginsCache.values.forEach {
-                            it.forEach { (plugin, artifacts) ->
+                            it.forEach { (pluginName, artifacts) ->
+                                val plugin = project.service<KotlinPluginsSettings>().pluginByName(pluginName)
+                                    ?: return@forEach
+
                                 artifacts.keys.distinctBy { k -> k.libVersion }.forEach { artifact ->
                                     scope.actualize(VersionedKotlinPluginDescriptor(plugin, artifact.libVersion))
                                 }
@@ -108,20 +111,6 @@ class KotlinPluginsStorage(
             pluginsCache.clear()
             actualizerJobs.clear()
             logger.debug("Storage closed")
-        }
-    }
-
-    private fun CoroutineScope.launchActualizer(
-        descriptor: KotlinPluginDescriptor,
-        body: suspend CoroutineScope.() -> Unit,
-    ): Job {
-        return launch(
-            context = CoroutineName("jar-fetcher-${descriptor.name}"),
-            start = CoroutineStart.LAZY,
-        ) {
-            actualizerLock.withLock {
-                body()
-            }
         }
     }
 
@@ -143,14 +132,14 @@ class KotlinPluginsStorage(
 
         val changed = AtomicBoolean(false)
 
-        val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        var failedToLocate = false
+        val nextJob = launch(context = CoroutineName("jar-fetcher-${descriptor.name}"), start = CoroutineStart.LAZY) {
+            val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
-        var failed = false
-        val nextJob = launchActualizer(descriptor) {
             val destination = cacheDir()?.resolve(kotlinIdeVersion)
-                ?: return@launchActualizer
+                ?: return@launch
 
-            logger.debug("Actualize plugins job started (${plugin.descriptor.name})")
+            logger.debug("Actualize plugins job started (${plugin.descriptor.name}), attempt: $attempt")
 
             val jarResult = runCatching {
                 withContext(Dispatchers.IO) {
@@ -164,19 +153,19 @@ class KotlinPluginsStorage(
             }
 
             if (jarResult.isFailure) {
-                failed = true
-                return@launchActualizer
+                failedToLocate = true
+                return@launch
             }
 
             val bundle = jarResult.getOrThrow()
 
             logger.debug("Actualize bundle ${plugin.descriptor.name}: ${bundle.jars.count { it.value == null }} not found")
 
-            failed = !bundle.allFound()
+            failedToLocate = !bundle.allFound()
 
             bundle.jars.values.filterNotNull().forEach { jar ->
                 val artifactsMap = pluginsCache.getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
-                    .getOrPut(descriptor) { ConcurrentHashMap() }
+                    .getOrPut(descriptor.name) { ConcurrentHashMap() }
 
                 val resolvedPlugin = ResolvedPlugin(jar.artifactId, jar.libVersion)
 
@@ -198,14 +187,20 @@ class KotlinPluginsStorage(
                     return@withLock
                 }
 
-                nextJob.invokeOnCompletion {
-                    actualizerJobs.remove(plugin)
+                nextJob.invokeOnCompletion { cause ->
+                    actualizerJobs.compute(plugin) { _, it ->
+                        if (it === nextJob) null else it
+                    }
 
-                    if (failed) {
+                    if (cause != null || nextJob.isCancelled) {
+                        return@invokeOnCompletion
+                    }
+
+                    if (failedToLocate) {
                         logger.debug("Actualize plugins job self restart (${plugin.descriptor.name})")
                         scope.actualize(plugin, attempt + 1)
                     } else if (changed.get()) {
-                        invalidateKotlinPluginsCache()
+                        invalidateKotlinPluginCache()
                     }
                 }
 
@@ -218,7 +213,7 @@ class KotlinPluginsStorage(
         val kotlinVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
         val map = pluginsCache.getOrPut(kotlinVersion) { ConcurrentHashMap() }
-        val pluginMap = map.getOrPut(requested.descriptor) { ConcurrentHashMap() }
+        val pluginMap = map.getOrPut(requested.descriptor.name) { ConcurrentHashMap() }
 
         val paths = requested.descriptor.ids.map {
             val artifact = RequestedKotlinPluginDescriptor(
@@ -231,8 +226,8 @@ class KotlinPluginsStorage(
         }
 
         logger.debug(
-            "Requested version is ${requested.version} for ${requested.descriptor.name}, " +
-                "versions: ${paths.map { "${it.artifactId} -> ${it.locatedVersion}" }}"
+            "Stored versions for ${requested.version} (${requested.descriptor.name}): " +
+                    "${paths.map { "${it.artifactId} -> ${it.locatedVersion}" }}"
         )
 
         if (paths.any { it.path == null } || paths.distinctBy { it.locatedVersion }.size != 1) {
@@ -278,11 +273,6 @@ class KotlinPluginsStorage(
         } else {
             requested.version
         }
-
-        logger.debug(
-            "Requested version is ${requested.version} for ${requested.descriptor.name} (${requested.artifact.artifactId}), " +
-                    "located version: $locatedVersion, path: $path"
-        )
 
         return StoredJar(
             artifactId = requested.artifact.artifactId,
@@ -334,7 +324,7 @@ class KotlinPluginsStorage(
         return _cacheDir
     }
 
-    private fun invalidateKotlinPluginsCache() {
+    private fun invalidateKotlinPluginCache() {
         try {
             val provider = KotlinCompilerPluginsProvider.getInstance(project)
 

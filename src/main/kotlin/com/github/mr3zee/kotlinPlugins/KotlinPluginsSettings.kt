@@ -59,6 +59,10 @@ class KotlinPluginsSettings(
         }
     }
 
+    fun pluginByName(name: String): KotlinPluginDescriptor? {
+        return safeState().plugins.find { it.name == name }
+    }
+
     fun updateToNewState(
         repositories: List<KotlinArtifactsRepository>,
         plugins: List<KotlinPluginDescriptor>,
@@ -216,7 +220,25 @@ object DefaultState : DefaultStateEntry by DefaultStateLoader.loadState() {
 open class VersionedKotlinPluginDescriptor(
     open val descriptor: KotlinPluginDescriptor,
     open val version: String,
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as VersionedKotlinPluginDescriptor
+
+        if (descriptor.name != other.descriptor.name) return false
+        if (version != other.version) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = descriptor.name.hashCode()
+        result = 31 * result + version.hashCode()
+        return result
+    }
+}
 
 class RequestedKotlinPluginDescriptor(
     descriptor: KotlinPluginDescriptor,

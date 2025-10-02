@@ -140,7 +140,7 @@ internal object KotlinPluginJarLocator {
             val versions = locateManifestAndGetVersions(logTag, locator, kotlinIdeVersion)
                 ?: return null
 
-            logger.debug("$logTag Found ${versions.size} versions for $kotlinIdeVersion: $versions")
+            logger.debug("$logTag Found ${versions.size} versions for ${artifact.artifactId}:$kotlinIdeVersion: $versions")
 
             val jar = locateArtifactByManifest(
                 logTag = logTag,
