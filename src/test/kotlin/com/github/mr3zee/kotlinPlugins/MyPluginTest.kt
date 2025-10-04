@@ -45,6 +45,7 @@ class MyPluginTest : BasePlatformTestCase() {
             "1.9.24-0.2.2-dev-2",
             "1.9.24-0.2.3-dev-1",
             "1.9.24-0.5.0-dev-1",
+            "1.9.24-1.5.0-dev-1",
             "1.9.25-0.5.0-dev-1",
         )
 
@@ -63,9 +64,9 @@ class MyPluginTest : BasePlatformTestCase() {
             version = "0.2.3",
         )
 
-        assertEquals("1.9.24-0.2.3-dev-1", getMatching(versions, "1.9.24", exact))
-        assertEquals("1.9.24-0.2.3-dev-1", getMatching(versions, "1.9.24", sameMajor))
-        assertEquals("1.9.24-0.5.0-dev-1", getMatching(versions, "1.9.24", latest))
+        assertEquals("0.2.3-dev-1", getMatching(versions, "1.9.24-", exact))
+        assertEquals("0.5.0-dev-1", getMatching(versions, "1.9.24-", sameMajor))
+        assertEquals("1.5.0-dev-1", getMatching(versions, "1.9.24-", latest))
     }
 
     fun testManifestDownload() = runBlocking {
@@ -129,7 +130,7 @@ class MyPluginTest : BasePlatformTestCase() {
             state.plugins,
             listOf(
                 KotlinPluginDescriptor(
-                    name = "kotlinx-rpc cli",
+                    name = "kotlinx-rpc",
                     ids = listOf(
                         MavenId("org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-cli"),
                         MavenId("org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2"),

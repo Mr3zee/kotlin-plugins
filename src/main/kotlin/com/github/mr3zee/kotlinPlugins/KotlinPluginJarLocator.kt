@@ -119,9 +119,9 @@ internal object KotlinPluginJarLocator {
                 }
 
                 KotlinArtifactsRepository.Type.PATH -> {
-                    val list = artifact.groupId.split(".")
-                    val groupPath = Path(list.first(), *list.drop(1).toTypedArray())
-                    val artifactPath = Path(it.value).resolve(groupPath).resolve(artifact.artifactId)
+                    val artifactPath = Path(it.value)
+                        .resolve(artifact.getPluginGroupPath())
+                        .resolve(artifact.artifactId)
 
                     ArtifactManifest.Locator.ByPath(artifactPath)
                 }
@@ -131,7 +131,7 @@ internal object KotlinPluginJarLocator {
                 artifactId = artifact.artifactId,
                 locator = locator,
                 matchFilter = versioned.asMatchFilter(),
-                dest = dest.resolve(artifact.getPluginGroupPath()),
+                dest = dest,
                 kotlinIdeVersion = kotlinIdeVersion,
             )
 
