@@ -70,15 +70,19 @@ class MyPluginTest : BasePlatformTestCase() {
     }
 
     fun testManifestDownload() = runBlocking {
-        val versions = KotlinPluginJarLocator.locateManifestAndGetVersions(
+        val manifestResult = KotlinPluginJarLocator.locateManifestAndGetVersions(
             "[testManifestDownload]",
             KotlinPluginJarLocator.ArtifactManifest.Locator.ByUrl(
                 "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin"
             ),
-        ) ?: return@runBlocking fail("Failed to download manifest")
+        )
+
+        if (manifestResult is KotlinPluginJarLocator.ManifestResult.FailedToFetch) {
+            fail("Failed to download manifest: ${manifestResult.state.message}")
+        }
 
         assertContainsElements(
-            versions,
+            (manifestResult as KotlinPluginJarLocator.ManifestResult.Found).versions,
             listOf("1.9.24-0.2.2-dev-1", "1.9.20-0.2.2-dev-1", "1.9.10-0.2.2-dev-1"),
         )
     }
@@ -86,7 +90,6 @@ class MyPluginTest : BasePlatformTestCase() {
     fun testDownloadJar() = runBlocking {
         val tempFile = Files.createTempDirectory("testDownloadJar")
         val result = KotlinPluginJarLocator.locateArtifacts(
-            project = project,
             versioned = VersionedKotlinPluginDescriptor(
                 descriptor = KotlinPluginDescriptor(
                     name = "[testDownloadJar]",
@@ -110,7 +113,7 @@ class MyPluginTest : BasePlatformTestCase() {
         val jarFile = tempFile.toFile().listFiles()?.firstOrNull()
         assertNotNull(jarFile)
         assertTrue(jarFile!!.exists())
-        assertEquals(jarFile.toPath(), result.jars.values.single()?.path)
+        assertEquals(jarFile.toPath(), (result.locatorResults.values.single() as LocatorResult.Cached).jar.path)
     }
 
     fun testXmlLoading() {

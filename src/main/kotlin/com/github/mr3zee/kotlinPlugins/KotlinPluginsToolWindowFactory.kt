@@ -27,6 +27,7 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.TreeUIHelper
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.content.ContentManager
@@ -88,7 +89,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
         val tree = KotlinPluginsTree(project, state, settings)
 
         settings.addOnUpdateHook(TREE_HOOK_KEY) {
-            tree.reloadModel()
+            tree.reset()
         }
 
         Disposer.register(contentManager) {
@@ -128,9 +129,26 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
         group.addSeparator()
 
-        group.add(object : AnAction("Refresh", "Refresh data", AllIcons.General.Refresh) {
+        group.add(object : AnAction("Update", "Update plugin data", AllIcons.Vcs.Fetch) {
+            override fun getActionUpdateThread(): ActionUpdateThread {
+                return ActionUpdateThread.BGT
+            }
+
             override fun actionPerformed(e: AnActionEvent) {
                 e.project?.service<KotlinPluginsStorage>()?.runActualization()
+
+                tree.redrawModel()
+                tree.expandAll()
+            }
+        })
+
+        group.add(object : AnAction("Refresh", "Refresh IDE indices", AllIcons.General.Refresh) {
+            override fun getActionUpdateThread(): ActionUpdateThread {
+                return ActionUpdateThread.BGT
+            }
+
+            override fun actionPerformed(e: AnActionEvent) {
+                e.project?.service<KotlinPluginsStorage>()?.invalidateKotlinPluginCache()
             }
         })
 
@@ -144,8 +162,8 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
             override fun isSelected(e: AnActionEvent): Boolean = tree.state.showSucceeded
             override fun setSelected(e: AnActionEvent, state: Boolean) {
                 tree.state.showSucceeded = state
-                tree.reloadModel()
-                TreeUtil.expandAll(tree)
+                tree.redrawModel()
+                tree.expandAll()
             }
         })
 
@@ -156,8 +174,8 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
             override fun isSelected(e: AnActionEvent): Boolean = tree.state.showSkipped
             override fun setSelected(e: AnActionEvent, state: Boolean) {
                 tree.state.showSkipped = state
-                tree.reloadModel()
-                TreeUtil.expandAll(tree)
+                tree.redrawModel()
+                tree.expandAll()
             }
         })
 
@@ -165,7 +183,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
         group.add(object : AnAction("Clear Caches", "Clear caches (not implemented)", AllIcons.Actions.ClearCash) {
             override fun actionPerformed(e: AnActionEvent) {
-                val clear = !tree.state.showClearCachesDialog || run {
+                val clear = run {
                     val (clear, dontShowAgain) = ClearCachesDialog.show()
                     tree.state.showClearCachesDialog = !dontShowAgain
                     clear
@@ -192,34 +210,53 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
     }
 }
 
-enum class ArtifactStatus {
-    SUCCESS,
-    IN_PROGRESS,
-    FAILED_TO_LOAD,
-    DISABLED,
-    SKIPPED,
-    EXCEPTION_IN_RUNTIME,
-    ;
-}
-
 private class NodeData(
     project: Project,
     val parent: NodeData?,
     val key: String,
     var label: String,
     var status: ArtifactStatus,
-    val isPlugin: Boolean,
+    val type: NodeType,
 ) : PresentableNodeDescriptor<NodeData>(project, parent) {
     override fun update(presentation: PresentationData) {
         presentation.presentableText = label
         presentation.setIcon(statusToIcon(status))
+        presentation.updatePresentation()
     }
 
     override fun getElement(): NodeData = this
 
     override fun createPresentation(): PresentationData {
         return PresentationData(label, null, statusToIcon(status), null).apply {
-            tooltip = statusToTooltip(isPlugin, status)
+            updatePresentation()
+        }
+    }
+
+    private fun PresentationData.updatePresentation() {
+        clearText()
+
+        tooltip = statusToTooltip(type, status)
+
+        if (type == NodeType.Version) {
+            when (val status = status) {
+                is ArtifactStatus.Success -> {
+                    if (status.actualVersion == status.requestedVersion) {
+                        addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                        addText(" Exact", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    } else {
+                        addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                        addText(" (${status.criteria}, requested: ${status.requestedVersion})", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    }
+                }
+
+                is ArtifactStatus.FailedToLoad -> {
+                    addText(label, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    addText(status.shortMessage, SimpleTextAttributes.ERROR_ATTRIBUTES)
+                }
+
+                // fallback to presentable text
+                else -> {}
+            }
         }
     }
 }
@@ -249,7 +286,17 @@ class KotlinPluginsTree(
     val state: TreeState,
     private val settings: KotlinPluginsSettings,
 ) : Tree(), Disposable {
-    private val rootNode = DefaultMutableTreeNode(NodeData(project, null, "root", "Kotlin Plugins", ArtifactStatus.IN_PROGRESS, false))
+    private val rootNode = DefaultMutableTreeNode(
+        NodeData(
+            project = project,
+            parent = null,
+            key = "root",
+            label = "Kotlin Plugins",
+            status = ArtifactStatus.InProgress,
+            type = NodeType.Plugin,
+        )
+    )
+
     private val model = DefaultTreeModel(rootNode)
 
     private val nodesByKey: MutableMap<String, DefaultMutableTreeNode> = mutableMapOf()
@@ -274,39 +321,68 @@ class KotlinPluginsTree(
 
         putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
 
-        reloadModel()
+        redrawModel()
 
         connection.subscribe(
             KotlinPluginStatusChangeListener.TOPIC,
             EventListener(),
         )
+
+        storage.requestStatuses()
     }
 
-    fun reloadModel() {
+    fun reset() {
+        nodesByKey.clear()
+        redrawModel()
+    }
+
+    fun redrawModel() {
         state.selectedNodeKey = null
 
         rootNode.removeAllChildren()
-        nodesByKey.clear()
 
         val plugins = settings.safeState().plugins
 
         for (plugin in plugins) {
-            val defaultStatus = if (plugin.enabled) ArtifactStatus.SKIPPED else ArtifactStatus.DISABLED
+            val defaultStatus = if (plugin.enabled) ArtifactStatus.Skipped else ArtifactStatus.Disabled
             val rootData = rootNode.userObject as NodeData
 
             val pluginKey = nodeKey(plugin.name)
-            val pluginNodeData = NodeData(project, rootData, pluginKey, plugin.name, defaultStatus, true)
+            val pluginNodeData = nodesByKey[pluginKey]?.data ?: NodeData(
+                project = project,
+                parent = rootData,
+                key = pluginKey,
+                label = plugin.name,
+                status = defaultStatus,
+                type = NodeType.Plugin,
+            )
+
             val pluginNode = DefaultMutableTreeNode(pluginNodeData)
 
             // children: maven ids
             for (id in plugin.ids) {
                 val artifactKey = nodeKey(plugin.name, id.id)
-                val artifactNodeData = NodeData(project, pluginNodeData, artifactKey, id.id, defaultStatus, false)
+                val artifactNodeData = nodesByKey[artifactKey]?.data ?: NodeData(
+                    project = project,
+                    parent = pluginNodeData,
+                    key = artifactKey,
+                    label = id.id,
+                    status = defaultStatus,
+                    type = NodeType.Artifact,
+                )
 
                 if (shouldIncludeStatus(artifactNodeData.status)) {
                     val artifactNode = DefaultMutableTreeNode(artifactNodeData)
                     pluginNode.add(artifactNode)
                     nodesByKey[artifactKey] = artifactNode
+
+                    nodesByKey.entries.filter { (k, _) ->
+                        k.startsWith(artifactKey) && k != artifactKey
+                    }.forEach { (k, v) ->
+                        val versionNode = DefaultMutableTreeNode(v.data)
+                        artifactNode.add(versionNode)
+                        nodesByKey[k] = versionNode
+                    }
                 }
             }
 
@@ -319,7 +395,11 @@ class KotlinPluginsTree(
 
         // root status handled separately
         val rootData = rootNode.userObject as NodeData
-        rootData.status = ArtifactStatus.SUCCESS
+        rootData.status = ArtifactStatus.Success(
+            requestedVersion = "",
+            actualVersion = "",
+            criteria = KotlinPluginDescriptor.VersionMatching.EXACT,
+        )
 
         model.reload()
         repaint()
@@ -327,8 +407,8 @@ class KotlinPluginsTree(
 
     private fun shouldIncludeStatus(status: ArtifactStatus): Boolean {
         return when (status) {
-            ArtifactStatus.SUCCESS -> state.showSucceeded
-            ArtifactStatus.DISABLED, ArtifactStatus.SKIPPED -> state.showSkipped
+            is ArtifactStatus.Success -> state.showSucceeded
+            ArtifactStatus.Disabled, ArtifactStatus.Skipped -> state.showSkipped
             else -> true
         }
     }
@@ -344,64 +424,118 @@ class KotlinPluginsTree(
     private val DefaultMutableTreeNode.data get(): NodeData = userObject as NodeData
 
     inner class EventListener : KotlinPluginStatusChangeListener {
-        override fun actualizerRequested(pluginName: String) {
-            updatePlugin(pluginName, ArtifactStatus.IN_PROGRESS)
+        override fun updatePlugin(pluginName: String, status: ArtifactStatus) {
+            this@KotlinPluginsTree.updatePlugin(pluginName, status)
         }
 
-        override fun actualizerFailed(pluginName: String) {
-            updatePlugin(pluginName, ArtifactStatus.FAILED_TO_LOAD)
+        override fun updateArtifact(
+            pluginName: String,
+            mavenId: String,
+            status: ArtifactStatus,
+        ) {
+            this@KotlinPluginsTree.updateArtifact(pluginName, mavenId, status)
         }
 
-        override fun notFound(pluginName: String, mavenId: MavenId) {
-            updateArtifact(pluginName, mavenId.id, ArtifactStatus.FAILED_TO_LOAD)
-        }
-
-        override fun found(pluginName: String, mavenId: MavenId) {
-            updateArtifact(pluginName, mavenId.id, ArtifactStatus.SUCCESS)
+        override fun updateVersion(
+            pluginName: String,
+            mavenId: String,
+            version: String,
+            status: ArtifactStatus,
+        ) {
+            this@KotlinPluginsTree.updateVersion(pluginName, mavenId, version, status)
         }
 
         override fun reset() {
-            reloadModel()
-            TreeUtil.expandAll(this@KotlinPluginsTree)
+            this@KotlinPluginsTree.reset()
+
+            expandAll()
         }
     }
 
     private fun updatePlugin(pluginName: String, status: ArtifactStatus) {
         val key = nodeKey(pluginName)
-        nodesByKey[key]?.let { parentNode ->
-            if (!update(parentNode, status)) {
+
+        val pluginNode = nodesByKey[key]
+        if (pluginNode != null) {
+            if (!update(pluginNode, status)) {
                 return
             }
 
-            val plugin = settings.pluginByName(parentNode.data.key) ?: return
-            val children = plugin.ids.mapNotNull { nodesByKey[nodeKey(plugin.name, it.id)] }
-            children.forEach { childNode ->
-                update(childNode, status)
-            }
+            updateChildren(pluginNode)
         }
     }
 
     private fun updateArtifact(pluginName: String, mavenId: String, status: ArtifactStatus) {
         val key = nodeKey(pluginName, mavenId)
 
-        nodesByKey[key]?.let { artifactNode ->
+        val artifactNode = nodesByKey[key]
+        if (artifactNode != null) {
             if (!update(artifactNode, status)) {
                 return
             }
 
-            val parentData = artifactNode.data.parent
-            if (parentData == null || parentData.key == "root" || !parentData.isPlugin) {
-                return
-            }
-
-            val plugin = settings.pluginByName(parentData.key) ?: return
-            val parentNode = nodesByKey[parentData.key] ?: return
-            val children = plugin.ids.mapNotNull { nodesByKey[nodeKey(plugin.name, it.id)]?.data }
-
-            val newParentStatus = pluginStatus(!plugin.enabled, children)
-
-            update(parentNode, newParentStatus)
+            updateChildren(artifactNode)
+            updateParents(artifactNode)
         }
+    }
+
+    private fun updateVersion(pluginName: String, mavenId: String, version: String, status: ArtifactStatus) {
+        val key = nodeKey(pluginName, mavenId, version)
+        var new = false
+
+        val versionNode = nodesByKey[key] ?: run {
+            new = true
+            DefaultMutableTreeNode(
+                NodeData(
+                    project = project,
+                    parent = nodesByKey[nodeKey(pluginName, mavenId)]?.data,
+                    key = key,
+                    label = version,
+                    status = status,
+                    type = NodeType.Version,
+                )
+            ).also {
+                nodesByKey[key] = it
+            }
+        }
+
+        if (!update(versionNode, status) && !new) {
+            return
+        }
+
+        updateParents(versionNode)
+
+        if (new) {
+            redrawModel()
+        }
+    }
+
+    private fun updateChildren(node: DefaultMutableTreeNode) {
+        node.nodeChildren().forEach { child ->
+            update(child, node.data.status)
+
+            updateChildren(child)
+        }
+    }
+
+    private fun updateParents(node: DefaultMutableTreeNode) {
+        val parentData = node.data.parent
+        if (parentData == null || parentData.key == rootNode.data.key) {
+            return
+        }
+
+        val parentNode = nodesByKey[parentData.key] ?: return
+        val children = parentNode.nodeChildren().map { it.data }
+
+        val newParentStatus = pluginStatus(children)
+
+        update(parentNode, newParentStatus)
+
+        updateParents(parentNode)
+    }
+
+    private fun DefaultMutableTreeNode.nodeChildren(): List<DefaultMutableTreeNode> {
+        return children().toList().filterIsInstance<DefaultMutableTreeNode>()
     }
 
     private fun update(node: DefaultMutableTreeNode, status: ArtifactStatus): Boolean {
@@ -419,11 +553,21 @@ class KotlinPluginsTree(
     }
 }
 
-fun nodeKey(pluginName: String, mavenId: String? = null): String {
-    return if (mavenId != null) {
-        "$pluginName::$mavenId"
-    } else {
-        pluginName
+fun nodeKey(pluginName: String, mavenId: String? = null, version: String? = null): String {
+    if (mavenId == null && version != null) {
+        error("MavenId is null, but version is not null, $version, $pluginName")
+    }
+
+    return when {
+        version != null -> {
+            "$pluginName::$mavenId::$version"
+        }
+        mavenId != null -> {
+            "$pluginName::$mavenId"
+        }
+        else -> {
+            pluginName
+        }
     }
 }
 
@@ -460,58 +604,76 @@ private class ClearCachesDialog : DialogWrapper(true) {
 }
 
 private fun statusToIcon(status: ArtifactStatus) = when (status) {
-    ArtifactStatus.SUCCESS -> AllIcons.RunConfigurations.TestPassed
-    ArtifactStatus.IN_PROGRESS -> AnimatedIcon.Default()
-    ArtifactStatus.FAILED_TO_LOAD -> AllIcons.RunConfigurations.TestFailed
-    ArtifactStatus.EXCEPTION_IN_RUNTIME -> AllIcons.RunConfigurations.TestError
-    ArtifactStatus.DISABLED -> AllIcons.RunConfigurations.TestSkipped
-    ArtifactStatus.SKIPPED -> AllIcons.RunConfigurations.TestIgnored
+    is ArtifactStatus.Success -> AllIcons.RunConfigurations.TestPassed
+    ArtifactStatus.InProgress -> AnimatedIcon.Default()
+    is ArtifactStatus.FailedToLoad -> AllIcons.RunConfigurations.TestFailed
+    ArtifactStatus.ExceptionInRuntime -> AllIcons.RunConfigurations.TestError
+    ArtifactStatus.Disabled -> AllIcons.RunConfigurations.TestSkipped
+    ArtifactStatus.Skipped -> AllIcons.RunConfigurations.TestIgnored
 }
 
-private fun statusToTooltip(isPlugin: Boolean, status: ArtifactStatus) = when (isPlugin) {
-    true -> when (status) {
-        ArtifactStatus.SUCCESS -> "All plugin artifacts are loaded successfully"
-        ArtifactStatus.IN_PROGRESS -> "Plugin is loading/refreshing"
-        ArtifactStatus.FAILED_TO_LOAD -> "Plugin failed to load at least one artifact"
-        ArtifactStatus.EXCEPTION_IN_RUNTIME -> "Plugin threw an exception during runtime"
-        ArtifactStatus.DISABLED -> "Plugin is disabled in settings"
-        ArtifactStatus.SKIPPED -> "Plugin is not requested in the project yet"
+enum class NodeType {
+    Plugin, Artifact, Version;
+}
+
+private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type) {
+    NodeType.Plugin -> when (status) {
+        is ArtifactStatus.Success -> "All plugin artifacts are loaded successfully"
+        ArtifactStatus.InProgress -> "Plugin is loading/refreshing"
+        is ArtifactStatus.FailedToLoad -> "Plugin failed to load at least one artifact"
+        ArtifactStatus.ExceptionInRuntime -> "Plugin threw an exception during runtime"
+        ArtifactStatus.Disabled -> "Plugin is disabled in settings"
+        ArtifactStatus.Skipped -> "Plugin is not requested in the project yet"
     }
 
-    false -> when (status) {
-        ArtifactStatus.SUCCESS -> "Artifact loaded successfully"
-        ArtifactStatus.IN_PROGRESS -> "Artifact is loading/refreshing"
-        ArtifactStatus.FAILED_TO_LOAD -> "Artifact failed to load (click for more details)"
-        ArtifactStatus.EXCEPTION_IN_RUNTIME -> "Artifact threw an exception during runtime (click for more details)"
-        ArtifactStatus.DISABLED -> "Artifact is disabled in settings"
-        ArtifactStatus.SKIPPED -> "Artifact is not requested in the project yet"
+    NodeType.Artifact -> when (status) {
+        is ArtifactStatus.Success -> "Artifact loaded successfully"
+        ArtifactStatus.InProgress -> "Artifact is loading/refreshing"
+        is ArtifactStatus.FailedToLoad -> "Artifact failed to load"
+        ArtifactStatus.ExceptionInRuntime -> "Artifact threw an exception during runtime"
+        ArtifactStatus.Disabled -> "Artifact is disabled in settings"
+        ArtifactStatus.Skipped -> "Artifact is not requested in the project yet"
+    }
+
+    NodeType.Version -> when (status) {
+        is ArtifactStatus.Success -> {
+            if (status.actualVersion == status.requestedVersion) {
+                "Requested version loaded successfully"
+            } else {
+                "<html>Version loaded successfully. <br/>" +
+                        "Requested ${status.requestedVersion}, " +
+                        "actual is ${status.actualVersion}, " +
+                        "criteria: ${status.criteria}"
+            }
+        }
+        ArtifactStatus.InProgress -> "Version is loading/refreshing"
+        is ArtifactStatus.FailedToLoad -> "Version failed to load: ${status.shortMessage} (click for more details)"
+        ArtifactStatus.ExceptionInRuntime -> "Version threw an exception during runtime (click for more details)"
+        ArtifactStatus.Disabled -> "Version is disabled in settings"
+        ArtifactStatus.Skipped -> "Version is not requested in the project yet"
     }
 }
 
-private fun pluginStatus(disabled: Boolean, artifacts: List<NodeData>): ArtifactStatus {
-    if (disabled) {
-        return ArtifactStatus.DISABLED
-    }
-
+private fun pluginStatus(artifacts: List<NodeData>): ArtifactStatus {
     if (artifacts.isEmpty()) {
-        return ArtifactStatus.SKIPPED
+        return ArtifactStatus.Skipped
     }
 
-    if (artifacts.all { it.status == ArtifactStatus.SUCCESS }) {
-        return ArtifactStatus.SUCCESS
+    if (artifacts.all { it.status is ArtifactStatus.Success }) {
+        return ArtifactStatus.Success("", "", KotlinPluginDescriptor.VersionMatching.EXACT)
     }
 
-    if (artifacts.any { it.status == ArtifactStatus.IN_PROGRESS }) {
-        return ArtifactStatus.IN_PROGRESS
+    if (artifacts.any { it.status == ArtifactStatus.InProgress }) {
+        return ArtifactStatus.InProgress
     }
 
-    if (artifacts.any { it.status == ArtifactStatus.FAILED_TO_LOAD }) {
-        return ArtifactStatus.FAILED_TO_LOAD
+    if (artifacts.any { it.status is ArtifactStatus.FailedToLoad }) {
+        return ArtifactStatus.FailedToLoad("")
     }
 
-    if (artifacts.any { it.status == ArtifactStatus.EXCEPTION_IN_RUNTIME }) {
-        return ArtifactStatus.EXCEPTION_IN_RUNTIME
+    if (artifacts.any { it.status == ArtifactStatus.ExceptionInRuntime }) {
+        return ArtifactStatus.ExceptionInRuntime
     }
 
-    return ArtifactStatus.SKIPPED
+    return ArtifactStatus.Skipped
 }
