@@ -30,6 +30,16 @@ class KotlinPluginsSettings(
 ) {
     private val logger by lazy { thisLogger() }
 
+    private val onUpdateHooks: MutableMap<String, () -> Unit> = mutableMapOf()
+
+    fun addOnUpdateHook(key: String, hook: () -> Unit) {
+        onUpdateHooks[key] = hook
+    }
+
+    fun removeOnUpdateHook(key: String) {
+        onUpdateHooks.remove(key)
+    }
+
     private fun updateWithDetectChanges(updateFunction: (currentState: State) -> State): State {
         val currentState = state
 
@@ -39,6 +49,7 @@ class KotlinPluginsSettings(
 
         if (currentState != newState) {
             project.service<KotlinPluginsStorage>().clearCaches()
+            onUpdateHooks.values.forEach { it() }
         }
 
         return newState.asState()

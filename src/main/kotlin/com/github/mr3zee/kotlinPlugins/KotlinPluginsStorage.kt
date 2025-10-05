@@ -3,6 +3,7 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
@@ -11,6 +12,7 @@ import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.provider.asNioPathOrNull
 import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.platform.eel.provider.upgradeBlocking
+import com.intellij.util.messages.Topic
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -19,6 +21,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.swing.SwingUtilities
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
@@ -26,6 +29,43 @@ import kotlin.io.path.deleteRecursively
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.minutes
+
+interface KotlinPluginStatusChangeListener {
+    fun actualizerRequested(pluginName: String)
+    fun actualizerFailed(pluginName: String)
+    fun notFound(pluginName: String, mavenId: MavenId)
+    fun found(pluginName: String, mavenId: MavenId)
+    fun reset()
+
+    companion object {
+        @Topic.ProjectLevel
+        val TOPIC = Topic("Kotlin Plugins Status Change", KotlinPluginStatusChangeListener::class.java)
+    }
+}
+
+class KotlinPluginStatusChangeListenerWrapper(
+    private val listener: KotlinPluginStatusChangeListener,
+) {
+    suspend fun actualizerRequested(pluginName: String) {
+        edt { listener.actualizerRequested(pluginName) }
+    }
+
+    suspend fun actualizerFailed(pluginName: String) {
+        edt { listener.actualizerFailed(pluginName) }
+    }
+
+    suspend fun notFound(pluginName: String, mavenId: MavenId) {
+        edt { listener.notFound(pluginName, mavenId) }
+    }
+
+    suspend fun found(pluginName: String, mavenId: MavenId) {
+        edt { listener.found(pluginName, mavenId) }
+    }
+
+    private suspend inline fun edt(crossinline action: () -> Unit) {
+        withContext(Dispatchers.EDT) { action() }
+    }
+}
 
 @Service(Service.Level.PROJECT)
 class KotlinPluginsStorage(
@@ -53,6 +93,14 @@ class KotlinPluginsStorage(
 
     private val pluginsCache =
         ConcurrentHashMap<String, ConcurrentHashMap<String, ConcurrentHashMap<ResolvedPlugin, Path>>>()
+
+    private val publisher by lazy {
+        project.messageBus.syncPublisher(KotlinPluginStatusChangeListener.TOPIC)
+    }
+
+    private val asyncPublisher by lazy {
+        KotlinPluginStatusChangeListenerWrapper(publisher)
+    }
 
     fun clearCaches() {
         scope.launch(CoroutineName("clear-caches")) {
@@ -138,6 +186,8 @@ class KotlinPluginsStorage(
 
         var failedToLocate = false
         val nextJob = launch(context = CoroutineName("jar-fetcher-${descriptor.name}"), start = CoroutineStart.LAZY) {
+            asyncPublisher.actualizerRequested(descriptor.name)
+
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
             val destination = cacheDir()?.resolve(kotlinIdeVersion)
@@ -145,7 +195,7 @@ class KotlinPluginsStorage(
 
             logger.debug("Actualize plugins job started (${plugin.descriptor.name}), attempt: $attempt")
 
-            val jarResult = runCatching {
+            val bundleResult = runCatching {
                 withContext(Dispatchers.IO) {
                     KotlinPluginJarLocator.locateArtifacts(
                         project = project,
@@ -156,18 +206,26 @@ class KotlinPluginsStorage(
                 }
             }
 
-            if (jarResult.isFailure) {
+            if (bundleResult.isFailure) {
+                asyncPublisher.actualizerFailed(descriptor.name)
                 failedToLocate = true
                 return@launch
             }
 
-            val bundle = jarResult.getOrThrow()
+            val bundle = bundleResult.getOrThrow()
 
             logger.debug("Actualize bundle ${plugin.descriptor.name}: ${bundle.jars.count { it.value == null }} not found")
 
             failedToLocate = !bundle.allFound()
 
-            bundle.jars.values.filterNotNull().forEach { jar ->
+            bundle.jars.entries.forEach { (id, jar) ->
+                if (jar == null) {
+                    asyncPublisher.notFound(descriptor.name, id)
+                    return@forEach
+                }
+
+                asyncPublisher.found(descriptor.name, id)
+
                 val artifactsMap = pluginsCache.getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
                     .getOrPut(descriptor.name) { ConcurrentHashMap() }
 
@@ -337,6 +395,9 @@ class KotlinPluginsStorage(
 
         if (provider is Disposable) {
             provider.dispose() // clear Kotlin plugin caches
+            SwingUtilities.invokeLater {
+                publisher.reset()
+            }
         }
 
         logger.debug("Invalidated KotlinCompilerPluginsProvider")
