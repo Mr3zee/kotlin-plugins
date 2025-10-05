@@ -6,7 +6,6 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
-import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.provider.asNioPathOrNull
@@ -90,18 +89,9 @@ class KotlinPluginsStorage(
                 launch(CoroutineName("actualizer-loop")) {
                     while (isActive) {
                         delay(2.minutes)
-                        logger.debug("Scheduled actualize job started")
+                        logger.debug("Scheduled actualize triggered")
 
-                        pluginsCache.values.forEach {
-                            it.forEach { (pluginName, artifacts) ->
-                                val plugin = project.service<KotlinPluginsSettings>().pluginByName(pluginName)
-                                    ?: return@forEach
-
-                                artifacts.keys.distinctBy { k -> k.libVersion }.forEach { artifact ->
-                                    scope.actualize(VersionedKotlinPluginDescriptor(plugin, artifact.libVersion))
-                                }
-                            }
-                        }
+                        runActualization()
                     }
                 }
             }
@@ -111,6 +101,20 @@ class KotlinPluginsStorage(
             pluginsCache.clear()
             actualizerJobs.clear()
             logger.debug("Storage closed")
+        }
+    }
+
+    fun runActualization() {
+        logger.debug("Requested actualization")
+        pluginsCache.values.forEach {
+            it.forEach { (pluginName, artifacts) ->
+                val plugin = project.service<KotlinPluginsSettings>().pluginByName(pluginName)
+                    ?: return@forEach
+
+                artifacts.keys.distinctBy { k -> k.libVersion }.forEach { artifact ->
+                    scope.actualize(VersionedKotlinPluginDescriptor(plugin, artifact.libVersion))
+                }
+            }
         }
     }
 
@@ -325,17 +329,17 @@ class KotlinPluginsStorage(
     }
 
     private fun invalidateKotlinPluginCache() {
-        try {
-            val provider = KotlinCompilerPluginsProvider.getInstance(project)
-
-            if (provider is Disposable) {
-                provider.dispose() // clear Kotlin plugin caches
-            }
-
-            logger.debug("Invalidated KotlinCompilerPluginsProvider")
-        } catch (_: ProcessCanceledException) {
-            // fixes "Container 'ProjectImpl@341936598 services' was disposed"
+        if (project.isDisposed) {
+            return
         }
+
+        val provider = KotlinCompilerPluginsProvider.getInstance(project)
+
+        if (provider is Disposable) {
+            provider.dispose() // clear Kotlin plugin caches
+        }
+
+        logger.debug("Invalidated KotlinCompilerPluginsProvider")
     }
 
     companion object {
