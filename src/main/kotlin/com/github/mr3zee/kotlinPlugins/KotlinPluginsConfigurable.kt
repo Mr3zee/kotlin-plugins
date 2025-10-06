@@ -14,6 +14,7 @@ import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBRadioButton
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
@@ -576,7 +577,7 @@ private class PluginsDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val reposPanel = JScrollPane(reposContainer).apply {
+        val reposPanel = JBScrollPane(reposContainer).apply {
             minimumSize = Dimension(300, 120)
         }
 

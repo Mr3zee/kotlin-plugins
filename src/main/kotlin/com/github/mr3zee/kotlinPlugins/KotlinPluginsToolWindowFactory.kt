@@ -11,13 +11,16 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.SimplePersistentStateComponent
-import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.SimpleToolWindowPanel
@@ -30,17 +33,23 @@ import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.TreeUIHelper
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.content.ContentManager
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import java.awt.BorderLayout
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.ScrollPaneConstants
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
+import kotlin.coroutines.cancellation.CancellationException
 
 class KotlinPluginsToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(
@@ -52,22 +61,30 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
         toolWindow.isShowStripeButton = true
 
         val toolWindowPanel = SimpleToolWindowPanel(false, true)
-        val contentManager = toolWindow.contentManager
 
         val state = TreeState.getInstance(project)
+        val (panel, tree) = createDiagnosticsPanel(project, state)
+
         val splitter = OnePixelSplitter(
             false,
             PROPORTION_KEY,
             0.3f,
             0.7f
         ).apply {
-            firstComponent = createDiagnosticsPanel(project, contentManager, state)
+            firstComponent = panel
             secondComponent = createPanel("Log tab is empty")
         }
 
         toolWindowPanel.setContent(splitter)
 
+        val contentManager = toolWindow.contentManager
         val content = contentManager.factory.createContent(toolWindowPanel, "", false)
+
+        Disposer.register(content) {
+            tree.dispose()
+            tree.settings.removeOnUpdateHook(TREE_HOOK_KEY)
+        }
+
         contentManager.addContent(content)
     }
 
@@ -80,21 +97,15 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
     private fun createDiagnosticsPanel(
         project: Project,
-        contentManager: ContentManager,
         state: TreeState,
-    ): JComponent {
+    ): Pair<JComponent, KotlinPluginsTree> {
         val panel = JPanel(BorderLayout())
         val settings = project.service<KotlinPluginsSettings>()
 
         val tree = KotlinPluginsTree(project, state, settings)
 
         settings.addOnUpdateHook(TREE_HOOK_KEY) {
-            tree.reset()
-        }
-
-        Disposer.register(contentManager) {
-            tree.dispose()
-            settings.removeOnUpdateHook(TREE_HOOK_KEY)
+            tree.updater.reset()
         }
 
         val scrollPane = ScrollPaneFactory
@@ -108,7 +119,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
         panel.add(toolbar.component, BorderLayout.WEST)
         panel.add(scrollPane, BorderLayout.CENTER)
 
-        return panel
+        return panel to tree
     }
 
     @Suppress("DuplicatedCode")
@@ -137,8 +148,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
             override fun actionPerformed(e: AnActionEvent) {
                 e.project?.service<KotlinPluginsStorage>()?.runActualization()
 
-                tree.redrawModel()
-                tree.expandAll()
+                tree.updater.redraw()
             }
         })
 
@@ -162,8 +172,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
             override fun isSelected(e: AnActionEvent): Boolean = tree.state.showSucceeded
             override fun setSelected(e: AnActionEvent, state: Boolean) {
                 tree.state.showSucceeded = state
-                tree.redrawModel()
-                tree.expandAll()
+                tree.updater.redraw()
             }
         })
 
@@ -174,8 +183,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
             override fun isSelected(e: AnActionEvent): Boolean = tree.state.showSkipped
             override fun setSelected(e: AnActionEvent, state: Boolean) {
                 tree.state.showSkipped = state
-                tree.redrawModel()
-                tree.expandAll()
+                tree.updater.redraw()
             }
         })
 
@@ -183,7 +191,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
         group.add(object : AnAction("Clear Caches", "Clear caches (not implemented)", AllIcons.Actions.ClearCash) {
             override fun actionPerformed(e: AnActionEvent) {
-                val clear = run {
+                val clear = !tree.state.showClearCachesDialog || run {
                     val (clear, dontShowAgain) = ClearCachesDialog.show()
                     tree.state.showClearCachesDialog = !dontShowAgain
                     clear
@@ -242,10 +250,10 @@ private class NodeData(
                 is ArtifactStatus.Success -> {
                     if (status.actualVersion == status.requestedVersion) {
                         addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-                        addText(" Exact", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        addText(" ${KotlinPluginDescriptor.VersionMatching.EXACT.toUi()}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                     } else {
                         addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-                        addText(" (${status.criteria}, requested: ${status.requestedVersion})", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        addText(" ${status.criteria.toUi()}, Requested: ${status.requestedVersion}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                     }
                 }
 
@@ -279,12 +287,14 @@ class TreeState : BaseState() {
     name = "com.github.mr3zee.kotlinPlugins.KotlinPluginTreeState",
     storages = [Storage(WORKSPACE_FILE)],
 )
-class KotlinPluginTreeStateService :  SimplePersistentStateComponent<TreeState>(TreeState())
+class KotlinPluginTreeStateService(
+    val treeScope: CoroutineScope
+) :  SimplePersistentStateComponent<TreeState>(TreeState())
 
 class KotlinPluginsTree(
     private val project: Project,
     val state: TreeState,
-    private val settings: KotlinPluginsSettings,
+    val settings: KotlinPluginsSettings,
 ) : Tree(), Disposable {
     private val rootNode = DefaultMutableTreeNode(
         NodeData(
@@ -297,6 +307,8 @@ class KotlinPluginsTree(
         )
     )
 
+    private val scope = project.service<KotlinPluginTreeStateService>().treeScope
+
     private val model = DefaultTreeModel(rootNode)
 
     private val nodesByKey: MutableMap<String, DefaultMutableTreeNode> = mutableMapOf()
@@ -304,11 +316,18 @@ class KotlinPluginsTree(
 
     private val storage: KotlinPluginsStorage = project.service()
 
+    private val updaters = Channel<() -> Unit>(Channel.UNLIMITED)
+
     override fun dispose() {
         connection.dispose()
         nodesByKey.clear()
         model.setRoot(null)
+        updaterJob?.cancel()
+        updaters.close()
+        updaters.cancel()
     }
+
+    val updater = StatusUpdater()
 
     init {
         model.setAsksAllowsChildren(false)
@@ -321,22 +340,20 @@ class KotlinPluginsTree(
 
         putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
 
+        startUpdatingUi()
+
+        updater.reset()
+
+        connection.subscribe(KotlinPluginStatusUpdater.TOPIC, updater)
+    }
+
+    private fun reset() {
+        nodesByKey.clear()
         redrawModel()
-
-        connection.subscribe(
-            KotlinPluginStatusChangeListener.TOPIC,
-            EventListener(),
-        )
-
         storage.requestStatuses()
     }
 
-    fun reset() {
-        nodesByKey.clear()
-        redrawModel()
-    }
-
-    fun redrawModel() {
+    private fun redrawModel() {
         state.selectedNodeKey = null
 
         rootNode.removeAllChildren()
@@ -344,7 +361,6 @@ class KotlinPluginsTree(
         val plugins = settings.safeState().plugins
 
         for (plugin in plugins) {
-            val defaultStatus = if (plugin.enabled) ArtifactStatus.Skipped else ArtifactStatus.Disabled
             val rootData = rootNode.userObject as NodeData
 
             val pluginKey = nodeKey(plugin.name)
@@ -353,44 +369,65 @@ class KotlinPluginsTree(
                 parent = rootData,
                 key = pluginKey,
                 label = plugin.name,
-                status = defaultStatus,
+                status = ArtifactStatus.Skipped,
                 type = NodeType.Plugin,
             )
 
             val pluginNode = DefaultMutableTreeNode(pluginNodeData)
 
             // children: maven ids
-            for (id in plugin.ids) {
+            val artifactNodes = plugin.ids.map { id ->
                 val artifactKey = nodeKey(plugin.name, id.id)
+
+                val versionNodes = nodesByKey.entries.filter { (k, _) ->
+                    k.startsWith(artifactKey) && k != artifactKey
+                }.map { (k, v) ->
+                    val versionNode = DefaultMutableTreeNode(v.data)
+                    nodesByKey[k] = versionNode
+                    versionNode
+                }
+
                 val artifactNodeData = nodesByKey[artifactKey]?.data ?: NodeData(
                     project = project,
                     parent = pluginNodeData,
                     key = artifactKey,
                     label = id.id,
-                    status = defaultStatus,
+                    status = ArtifactStatus.Skipped,
                     type = NodeType.Artifact,
                 )
+                val artifactNode = DefaultMutableTreeNode(artifactNodeData)
 
-                if (shouldIncludeStatus(artifactNodeData.status)) {
-                    val artifactNode = DefaultMutableTreeNode(artifactNodeData)
-                    pluginNode.add(artifactNode)
-                    nodesByKey[artifactKey] = artifactNode
-
-                    nodesByKey.entries.filter { (k, _) ->
-                        k.startsWith(artifactKey) && k != artifactKey
-                    }.forEach { (k, v) ->
-                        val versionNode = DefaultMutableTreeNode(v.data)
-                        artifactNode.add(versionNode)
-                        nodesByKey[k] = versionNode
-                    }
+                val artifactStatus = when {
+                    !plugin.enabled -> ArtifactStatus.Disabled
+                    versionNodes.isEmpty() -> artifactNodeData.status
+                    else -> parentStatus(versionNodes.map { it.data })
                 }
+
+                artifactNodeData.status = artifactStatus
+
+                if (shouldIncludeStatus(artifactStatus)) {
+                    pluginNode.add(artifactNode)
+                    versionNodes.forEach { artifactNode.add(it) }
+                }
+
+                nodesByKey[artifactKey] = artifactNode
+                artifactNode
             }
 
-            // include plugin if it passes filter (by its own status) or has any children
-            if (shouldIncludeStatus(pluginNodeData.status) || pluginNode.childCount > 0) {
-                rootNode.add(pluginNode)
-                nodesByKey[pluginKey] = pluginNode
+            val pluginStatus = when {
+                !plugin.enabled -> ArtifactStatus.Disabled
+                artifactNodes.isEmpty() -> ArtifactStatus.Skipped
+                else -> parentStatus(artifactNodes.map { it.data })
             }
+
+            pluginNodeData.status = pluginStatus
+
+            // include a plugin if it passes filter (by its own status) or has any children
+            if (shouldIncludeStatus(pluginStatus) || pluginNode.childCount > 0) {
+                rootNode.add(pluginNode)
+            }
+
+            nodesByKey[pluginKey] = pluginNode
         }
 
         // root status handled separately
@@ -423,8 +460,8 @@ class KotlinPluginsTree(
 
     private val DefaultMutableTreeNode.data get(): NodeData = userObject as NodeData
 
-    inner class EventListener : KotlinPluginStatusChangeListener {
-        override fun updatePlugin(pluginName: String, status: ArtifactStatus) {
+    inner class StatusUpdater : KotlinPluginStatusUpdater {
+        override fun updatePlugin(pluginName: String, status: ArtifactStatus) = updateUi {
             this@KotlinPluginsTree.updatePlugin(pluginName, status)
         }
 
@@ -432,7 +469,7 @@ class KotlinPluginsTree(
             pluginName: String,
             mavenId: String,
             status: ArtifactStatus,
-        ) {
+        ) = updateUi {
             this@KotlinPluginsTree.updateArtifact(pluginName, mavenId, status)
         }
 
@@ -441,14 +478,45 @@ class KotlinPluginsTree(
             mavenId: String,
             version: String,
             status: ArtifactStatus,
-        ) {
+        ) = updateUi {
             this@KotlinPluginsTree.updateVersion(pluginName, mavenId, version, status)
         }
 
-        override fun reset() {
+        override fun reset() = updateUi {
             this@KotlinPluginsTree.reset()
 
             expandAll()
+        }
+
+        override fun redraw() = updateUi {
+            this@KotlinPluginsTree.redrawModel()
+
+            expandAll()
+        }
+    }
+
+    private fun updateUi(body: () -> Unit) {
+        updaters.trySend(body)
+    }
+
+    private var updaterJob: Job? = null
+    private val logger = thisLogger()
+
+    private fun startUpdatingUi() {
+        updaterJob = scope.launch(Dispatchers.EDT + CoroutineName("KotlinPluginsTreeUpdater")) {
+            while (true) {
+                val updater = updaters.receiveCatching().getOrNull() ?: break
+
+                try {
+                    updater.invoke()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: ProcessCanceledException) {
+                    throw e
+                } catch (e: Throwable) {
+                    logger.error("Error while updating Tree UI", e)
+                }
+            }
         }
     }
 
@@ -506,7 +574,7 @@ class KotlinPluginsTree(
         updateParents(versionNode)
 
         if (new) {
-            redrawModel()
+            updater.redraw()
         }
     }
 
@@ -527,7 +595,7 @@ class KotlinPluginsTree(
         val parentNode = nodesByKey[parentData.key] ?: return
         val children = parentNode.nodeChildren().map { it.data }
 
-        val newParentStatus = pluginStatus(children)
+        val newParentStatus = parentStatus(children)
 
         update(parentNode, newParentStatus)
 
@@ -654,26 +722,34 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
     }
 }
 
-private fun pluginStatus(artifacts: List<NodeData>): ArtifactStatus {
-    if (artifacts.isEmpty()) {
+private fun parentStatus(children: List<NodeData>): ArtifactStatus {
+    if (children.isEmpty()) {
         return ArtifactStatus.Skipped
     }
 
-    if (artifacts.all { it.status is ArtifactStatus.Success }) {
+    if (children.all { it.status is ArtifactStatus.Success }) {
         return ArtifactStatus.Success("", "", KotlinPluginDescriptor.VersionMatching.EXACT)
     }
 
-    if (artifacts.any { it.status == ArtifactStatus.InProgress }) {
+    if (children.any { it.status == ArtifactStatus.InProgress }) {
         return ArtifactStatus.InProgress
     }
 
-    if (artifacts.any { it.status is ArtifactStatus.FailedToLoad }) {
+    if (children.any { it.status is ArtifactStatus.FailedToLoad }) {
         return ArtifactStatus.FailedToLoad("")
     }
 
-    if (artifacts.any { it.status == ArtifactStatus.ExceptionInRuntime }) {
+    if (children.any { it.status == ArtifactStatus.ExceptionInRuntime }) {
         return ArtifactStatus.ExceptionInRuntime
     }
 
     return ArtifactStatus.Skipped
+}
+
+private fun KotlinPluginDescriptor.VersionMatching.toUi(): String {
+    return when (this) {
+        KotlinPluginDescriptor.VersionMatching.EXACT -> "Exact"
+        KotlinPluginDescriptor.VersionMatching.SAME_MAJOR -> "Same Major"
+        KotlinPluginDescriptor.VersionMatching.LATEST -> "Latest"
+    }
 }

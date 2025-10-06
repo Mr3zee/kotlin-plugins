@@ -3,7 +3,6 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
@@ -21,7 +20,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.swing.SwingUtilities
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
@@ -42,7 +40,7 @@ sealed interface ArtifactStatus {
     object ExceptionInRuntime : ArtifactStatus
 
     object Disabled : ArtifactStatus
-    object Skipped: ArtifactStatus
+    object Skipped : ArtifactStatus
 }
 
 sealed interface ArtifactState {
@@ -70,32 +68,17 @@ private fun ArtifactState.toStatus(): ArtifactStatus {
     }
 }
 
-interface KotlinPluginStatusChangeListener {
+interface KotlinPluginStatusUpdater {
     fun updatePlugin(pluginName: String, status: ArtifactStatus)
     fun updateArtifact(pluginName: String, mavenId: String, status: ArtifactStatus)
     fun updateVersion(pluginName: String, mavenId: String, version: String, status: ArtifactStatus)
 
     fun reset()
+    fun redraw()
 
     companion object {
         @Topic.ProjectLevel
-        val TOPIC = Topic("Kotlin Plugins Status Change", KotlinPluginStatusChangeListener::class.java)
-    }
-}
-
-class KotlinPluginStatusChangeListenerWrapper(
-    private val listener: KotlinPluginStatusChangeListener,
-) {
-    suspend fun updatePlugin(pluginName: String, status: ArtifactStatus) {
-        edt { listener.updatePlugin(pluginName, status) }
-    }
-
-    suspend fun updateArtifactVersion(pluginName: String, mavenId: String, version: String, status: ArtifactStatus) {
-        edt { listener.updateVersion(pluginName, mavenId, version, status) }
-    }
-
-    private suspend inline fun edt(crossinline action: () -> Unit) {
-        withContext(Dispatchers.EDT) { action() }
+        val TOPIC = Topic("Kotlin Plugins Status Change", KotlinPluginStatusUpdater::class.java)
     }
 }
 
@@ -127,11 +110,7 @@ class KotlinPluginsStorage(
         ConcurrentHashMap<String, ConcurrentHashMap<String, ConcurrentHashMap<ResolvedPlugin, ArtifactState>>>()
 
     private val publisher by lazy {
-        project.messageBus.syncPublisher(KotlinPluginStatusChangeListener.TOPIC)
-    }
-
-    private val asyncPublisher by lazy {
-        KotlinPluginStatusChangeListenerWrapper(publisher)
+        project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC)
     }
 
     fun clearCaches() {
@@ -149,7 +128,6 @@ class KotlinPluginsStorage(
                 actualizerJobs.clear()
 
                 pluginsCache.clear()
-                invalidateKotlinPluginCache()
 
                 cacheDir()?.let {
                     @OptIn(ExperimentalPathApi::class)
@@ -157,6 +135,8 @@ class KotlinPluginsStorage(
                         it.deleteRecursively()
                     }
                 }
+
+                invalidateKotlinPluginCache()
             } finally {
                 actualizerLock.unlock()
             }
@@ -191,7 +171,7 @@ class KotlinPluginsStorage(
                 val plugin = project.service<KotlinPluginsSettings>().pluginByName(pluginName)
                     ?: return@forEach
 
-                artifacts.keys.distinctBy { k -> k.libVersion }.forEach { artifact ->
+                artifacts.keys.forEach { artifact ->
                     scope.actualize(VersionedKotlinPluginDescriptor(plugin, artifact.libVersion))
                 }
             }
@@ -199,7 +179,20 @@ class KotlinPluginsStorage(
     }
 
     fun requestStatuses() {
-        // todo
+        logger.debug("Requested statuses")
+
+        pluginsCache.values.forEach { plugins ->
+            plugins.forEach { (pluginName, artifacts) ->
+                artifacts.entries.forEach { (artifact, state) ->
+                    publisher.updateVersion(
+                        pluginName = pluginName,
+                        mavenId = artifact.mavenId.id,
+                        version = artifact.libVersion,
+                        status = state.toStatus(),
+                    )
+                }
+            }
+        }
     }
 
     private fun CoroutineScope.actualize(
@@ -222,7 +215,7 @@ class KotlinPluginsStorage(
 
         var failedToLocate = false
         val nextJob = launch(context = CoroutineName("jar-fetcher-${descriptor.name}"), start = CoroutineStart.LAZY) {
-            asyncPublisher.updatePlugin(descriptor.name, ArtifactStatus.InProgress)
+            publisher.updatePlugin(descriptor.name, ArtifactStatus.InProgress)
 
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
@@ -242,7 +235,7 @@ class KotlinPluginsStorage(
             }
 
             if (bundleResult.isFailure) {
-                asyncPublisher.updatePlugin(
+                publisher.updatePlugin(
                     pluginName = descriptor.name,
                     status = ArtifactStatus.FailedToLoad("Unexpected error"),
                 )
@@ -254,7 +247,7 @@ class KotlinPluginsStorage(
 
             logger.debug(
                 "Actualize bundle ${plugin.descriptor.name}: " +
-                    "${bundle.locatorResults.count { it.value !is LocatorResult.Cached }} not found"
+                        "${bundle.locatorResults.count { it.value !is LocatorResult.Cached }} not found"
             )
 
             failedToLocate = !bundle.allFound()
@@ -262,7 +255,7 @@ class KotlinPluginsStorage(
             bundle.locatorResults.entries.forEach { (id, locatorResult) ->
                 val status = locatorResult.state.toStatus()
 
-                asyncPublisher.updateArtifactVersion(
+                publisher.updateVersion(
                     pluginName = descriptor.name,
                     mavenId = id.id,
                     version = locatorResult.libVersion,
@@ -284,6 +277,8 @@ class KotlinPluginsStorage(
                     new
                 }
             }
+
+            publisher.redraw()
         }
 
         scope.launch(CoroutineName("actualize-plugins-job-starter-${descriptor.name}")) {
@@ -447,11 +442,9 @@ class KotlinPluginsStorage(
 
         if (provider is Disposable) {
             provider.dispose() // clear Kotlin plugin caches
-            SwingUtilities.invokeLater {
-                publisher.reset()
-            }
         }
 
+        publisher.reset()
         logger.debug("Invalidated KotlinCompilerPluginsProvider")
     }
 

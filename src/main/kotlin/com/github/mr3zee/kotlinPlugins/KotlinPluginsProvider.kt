@@ -44,8 +44,6 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
         }
     }
 
-    companion object {
-        private val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
-    }
 }
 
+private val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
