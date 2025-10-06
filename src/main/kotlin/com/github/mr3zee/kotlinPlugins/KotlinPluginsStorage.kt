@@ -24,6 +24,7 @@ import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
 import kotlin.io.path.deleteRecursively
+import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.minutes
@@ -312,41 +313,85 @@ class KotlinPluginsStorage(
     }
 
     fun getPluginPath(requested: RequestedKotlinPluginDescriptor): Path? {
-        val kotlinVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
-        val map = pluginsCache.getOrPut(kotlinVersion) { ConcurrentHashMap() }
+        val map = pluginsCache.getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
         val pluginMap = map.getOrPut(requested.descriptor.name) { ConcurrentHashMap() }
 
         val paths = requested.descriptor.ids.map {
-            val artifact = RequestedKotlinPluginDescriptor(
-                descriptor = requested.descriptor,
-                version = requested.version,
-                artifact = it,
-            )
-
-            findArtifact(pluginMap, artifact, kotlinVersion)
+            it.id to pluginMap[ResolvedPlugin(it, requested.version)] as? ArtifactState.Cached?
         }
 
         logger.debug(
-            "Stored versions for ${requested.version} (${requested.descriptor.name}): " +
-                    "${paths.map { "${it.artifactId} -> ${it.locatedVersion}" }}"
+            "Cached versions for ${requested.version} (${requested.descriptor.name}): " +
+                    "${paths.map { "${it.first} -> ${it.second?.actualVersion}" }}"
         )
 
-        if (paths.any { it.path == null } || paths.distinctBy { it.locatedVersion }.size != 1) {
+        val allExist = paths.all { it.second?.path?.exists() == true }
+        val differentVersions = paths.distinctBy { it.second?.actualVersion }.count()
+
+        // return not null only when all requested plugins are present and have the same version
+        if (!allExist || differentVersions != 1) {
             // no requested version is present for all requested plugins, or versions are not equal
-            scope.actualize(requested)
+            updateCacheFromDisk(requested, pluginMap, kotlinIdeVersion, paths.associate { it })
             return null
         }
 
-        // return not null only when all requested plugins are present
-        return paths.find { it.artifactId == requested.artifact.artifactId }?.path
+        val state = paths.find { it.first == requested.artifact.id }?.second
+            ?: error("Should not happen")
+
+        publisher.updateVersion(
+            pluginName = requested.descriptor.name,
+            mavenId = requested.artifact.id,
+            version = requested.version,
+            status = state.toStatus(),
+        )
+
+        return state.path
     }
 
     class StoredJar(
-        val artifactId: String,
+        val mavenId: String,
         val locatedVersion: String?,
         val path: Path?,
     )
+
+    private fun updateCacheFromDisk(
+        requested: RequestedKotlinPluginDescriptor,
+        pluginMap: ConcurrentHashMap<ResolvedPlugin, ArtifactState>,
+        kotlinIdeVersion: String,
+        knownByIde: Map<String, ArtifactState.Cached?>,
+    ) {
+        scope.launch(CoroutineName("update-cache-from-disk-${requested.descriptor.name}-${requested.version}")) {
+            logger.debug("Updating cache from disk for ${requested.descriptor.name} (${requested.version})")
+
+            val paths = requested.descriptor.ids.map {
+                val artifact = RequestedKotlinPluginDescriptor(
+                    descriptor = requested.descriptor,
+                    version = requested.version,
+                    artifact = it,
+                )
+
+                findArtifact(pluginMap, artifact, kotlinIdeVersion)
+            }
+
+            logger.debug(
+                "On disk versions for ${requested.version} (${requested.descriptor.name}): " +
+                        "${paths.map { "${it.mavenId} -> ${it.path}" }}"
+            )
+
+            if (paths.any { it.path == null } || paths.distinctBy { it.locatedVersion }.size != 1) {
+                logger.debug("Some versions are missing for ${requested.descriptor.name} (${requested.version})")
+                scope.actualize(requested)
+            }
+
+            if (paths.any { knownByIde[it.mavenId]?.path != it.path }) {
+                logger.debug("Found new versions on disk for ${requested.descriptor.name} (${requested.version})")
+
+                invalidateKotlinPluginCache()
+            }
+        }
+    }
 
     private fun findArtifact(
         pluginMap: ConcurrentHashMap<ResolvedPlugin, ArtifactState>,
@@ -384,7 +429,7 @@ class KotlinPluginsStorage(
         }
 
         return StoredJar(
-            artifactId = requested.artifact.artifactId,
+            mavenId = requested.artifact.id,
             locatedVersion = locatedVersion,
             path = (path as? ArtifactState.Cached)?.path,
         )
