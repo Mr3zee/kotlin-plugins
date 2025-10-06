@@ -530,7 +530,11 @@ internal object KotlinPluginJarLocator {
     }
 
     sealed interface ManifestResult {
-        class Found(val versions: List<String>) : ManifestResult
+        class Found(val versions: List<String>) : ManifestResult {
+            override fun toString(): String {
+                return versions.toString()
+            }
+        }
         class FailedToFetch(val state: ArtifactState.FailedToFetch) : ManifestResult
     }
 

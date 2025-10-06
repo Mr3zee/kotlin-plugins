@@ -26,10 +26,64 @@ import java.awt.Dimension
 import javax.swing.*
 import javax.swing.table.TableRowSorter
 
+private class LocalState {
+    val repositories: MutableList<KotlinArtifactsRepository> = mutableListOf()
+    val plugins: MutableList<KotlinPluginDescriptor> = mutableListOf()
+    val pluginsEnabled: MutableMap<String, Boolean> = mutableMapOf()
+    var exceptionAnalyzerEnabled: Boolean = false
+    var showCacheClearConfirmationDialog: Boolean = true
+
+    fun isModified(
+        analyzer: KotlinPluginsExceptionAnalyzerState,
+        tree: TreeState,
+        settings: KotlinPluginsSettings.State,
+    ): Boolean {
+        return repositories != settings.repositories ||
+                plugins != settings.plugins ||
+                pluginsEnabled != settings.pluginsEnabled ||
+                exceptionAnalyzerEnabled != analyzer.enabled ||
+                showCacheClearConfirmationDialog != tree.showClearCachesDialog
+    }
+
+    fun reset(
+        analyzer: KotlinPluginsExceptionAnalyzerState,
+        tree: TreeState,
+        settings: KotlinPluginsSettings.State,
+    ) {
+        repositories.clear()
+        repositories.addAll(settings.repositories)
+
+        plugins.clear()
+        plugins.addAll(settings.plugins)
+
+        pluginsEnabled.clear()
+        pluginsEnabled.putAll(settings.pluginsEnabled)
+
+        exceptionAnalyzerEnabled = analyzer.enabled
+        showCacheClearConfirmationDialog = tree.showClearCachesDialog
+    }
+
+    fun applyTo(
+        analyzer: KotlinPluginsExceptionAnalyzerState,
+        tree: TreeState,
+        settings: KotlinPluginsSettings,
+    ) {
+        val enabledPlugins = plugins.map {
+            it.copy(enabled = pluginsEnabled[it.name] ?: it.enabled)
+        }
+
+        settings.updateToNewState(repositories, enabledPlugins)
+
+        analyzer.enabled = exceptionAnalyzerEnabled
+        tree.showClearCachesDialog = showCacheClearConfirmationDialog
+    }
+
+    private val KotlinPluginsSettings.State.pluginsEnabled: Map<String, Boolean>
+        get() = plugins.associate { it.name to it.enabled }
+}
+
 class KotlinPluginsConfigurable(private val project: Project) : Configurable {
-    private val repositories: MutableList<KotlinArtifactsRepository> = mutableListOf()
-    private val plugins: MutableList<KotlinPluginDescriptor> = mutableListOf()
-    private val pluginsEnabled: MutableMap<String, Boolean> = mutableMapOf()
+    private val local: LocalState = LocalState()
 
     private lateinit var repoTable: JBTable
     private lateinit var pluginsTable: JBTable
@@ -42,6 +96,20 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
     override fun createComponent(): JComponent {
         if (rootPanel != null) return rootPanel as JPanel
+
+        val analyzerCheckBox = JBCheckBox(
+            "Enable Kotlin plugin exception analyzer",
+            local.exceptionAnalyzerEnabled,
+        ).apply {
+            addItemListener { local.exceptionAnalyzerEnabled = isSelected }
+        }
+
+        val clearCachesCheckBox = JBCheckBox(
+            "Show confirmation dialog when clearing caches",
+            local.showCacheClearConfirmationDialog,
+        ).apply {
+            addItemListener { local.showCacheClearConfirmationDialog = isSelected }
+        }
 
         // Tables and models
         repoModel = ListTableModel(
@@ -68,12 +136,12 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
                 override fun getColumnClass(): Class<*> = java.lang.Boolean::class.java
 
-                override fun valueOf(item: KotlinPluginDescriptor): Boolean = pluginsEnabled[item.name] ?: item.enabled
+                override fun valueOf(item: KotlinPluginDescriptor): Boolean = local.pluginsEnabled[item.name] ?: item.enabled
 
                 override fun isCellEditable(item: KotlinPluginDescriptor?): Boolean = true
 
                 override fun setValue(item: KotlinPluginDescriptor, value: Boolean) {
-                    pluginsEnabled[item.name] = value
+                    local.pluginsEnabled[item.name] = value
                 }
             },
             object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Name") {
@@ -107,6 +175,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 setSortable(3, false)
                 setSortable(4, false)
             }
+
+            preferredScrollableViewportSize = Dimension(preferredScrollableViewportSize.width, rowHeight * 12)
         }
 
         val repoPanel = ToolbarDecorator.createDecorator(repoTable)
@@ -135,17 +205,20 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
         val content = JPanel(BorderLayout())
         val form = FormBuilder.createFormBuilder()
+            .addComponent(analyzerCheckBox)
+            .addComponent(clearCachesCheckBox)
             .addSeparator(5)
             .addLabeledComponent(
-                JBLabel("Maven repositories", AllIcons.Nodes.Folder, SwingConstants.LEADING),
-                repoPanel,
-                true
+                /* label = */ JBLabel("Maven repositories", AllIcons.Nodes.Folder, SwingConstants.LEADING),
+                /* component = */ repoPanel,
+                /* topInset = */ 5,
+                /* labelOnTop = */ true,
             )
-            .addSeparator(5)
             .addLabeledComponent(
-                JBLabel("Kotlin plugins", AllIcons.Nodes.Plugin, SwingConstants.LEADING),
-                pluginsPanel,
-                true
+                /* label = */ JBLabel("Kotlin plugins", AllIcons.Nodes.Plugin, SwingConstants.LEADING),
+                /* component = */ pluginsPanel,
+                /* topInset = */ 5,
+                /* labelOnTop = */ true,
             )
             .panel
         content.add(form, BorderLayout.NORTH)
@@ -159,49 +232,44 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     }
 
     override fun isModified(): Boolean {
-        val state = project.service<KotlinPluginsSettings>().safeState()
-        val reposModified = repositories != state.repositories
-        val pluginsModified =
-            plugins != state.plugins || pluginsEnabled != state.plugins.associateBy({ it.name }, { it.enabled })
+        val settingState = project.service<KotlinPluginsSettings>().safeState()
+        val analyzerState = project.service<KotlinPluginsExceptionAnalyzer>().state
+        val treeState = project.service<KotlinPluginTreeStateService>().state
 
-        return reposModified || pluginsModified
+        return local.isModified(analyzerState, treeState, settingState)
     }
 
     override fun apply() {
-        val service = project.service<KotlinPluginsSettings>()
+        val settings = project.service<KotlinPluginsSettings>()
+        val analyzer = project.service<KotlinPluginsExceptionAnalyzer>().state
+        val treeState = project.service<KotlinPluginTreeStateService>().state
 
-        val enabledPlugins = plugins.map {
-            it.copy(enabled = pluginsEnabled[it.name] ?: it.enabled)
-        }
-
-        service.updateToNewState(repositories, enabledPlugins)
+        local.applyTo(analyzer, treeState, settings)
     }
 
     override fun reset() {
-        val state = project.service<KotlinPluginsSettings>().safeState()
-        repositories.clear()
-        repositories.addAll(state.repositories)
-        repoModel.items = ArrayList(repositories)
+        val settings = project.service<KotlinPluginsSettings>().safeState()
+        val analyzer = project.service<KotlinPluginsExceptionAnalyzer>().state
+        val treeState = project.service<KotlinPluginTreeStateService>().state
 
-        plugins.clear()
-        plugins.addAll(state.plugins)
-        pluginsEnabled.clear()
-        pluginsEnabled.putAll(state.plugins.associateBy({ it.name }, { it.enabled }))
-        pluginsModel.items = ArrayList(plugins)
+        local.reset(analyzer, treeState, settings)
+
+        repoModel.items = ArrayList(local.repositories)
+        pluginsModel.items = ArrayList(local.plugins)
     }
 
     // region Repository actions
     private fun onAddRepository() {
         val dialog = RepositoryDialog(
-            currentNames = repositories.map { it.name },
+            currentNames = local.repositories.map { it.name },
             initial = null,
             project = project,
         )
 
         if (dialog.showAndGet()) {
             val entry = dialog.getResult() ?: return
-            repositories.add(entry)
-            repoModel.items = ArrayList(repositories)
+            local.repositories.add(entry)
+            repoModel.items = ArrayList(local.repositories)
             selectLast(repoTable)
         }
     }
@@ -210,15 +278,15 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         val selected = repoTable.selectedObject(repoModel) ?: return
         val idx = repoTable.selectedRow
         val dialog = RepositoryDialog(
-            currentNames = repositories.map { it.name },
+            currentNames = local.repositories.map { it.name },
             initial = selected,
             project = project,
         )
 
         if (dialog.showAndGet()) {
             val updated = dialog.getResult() ?: return
-            repositories[idx] = updated
-            repoModel.items = ArrayList(repositories)
+            local.repositories[idx] = updated
+            repoModel.items = ArrayList(local.repositories)
             repoTable.selectionModel.setSelectionInterval(idx, idx)
         }
     }
@@ -227,12 +295,12 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     private fun onRemoveRepository() {
         val idx = repoTable.selectedRow
         if (idx >= 0) {
-            val repo = repositories[idx]
+            val repo = local.repositories[idx]
             if (repo.name in DefaultState.repositoryMap) {
                 return
             }
-            repositories.removeAt(idx)
-            repoModel.items = ArrayList(repositories)
+            local.repositories.removeAt(idx)
+            repoModel.items = ArrayList(local.repositories)
         }
     }
     // endregion
@@ -240,17 +308,17 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     // region Plugins actions
     private fun onAddPlugin() {
         val dialog = PluginsDialog(
-            currentNames = plugins.map { it.name },
-            availableRepositories = repositories,
+            currentNames = local.plugins.map { it.name },
+            availableRepositories = local.repositories,
             initial = null,
             enabledInitial = true,
         )
 
         if (dialog.showAndGet()) {
             val entry = dialog.getResult() ?: return
-            plugins.add(entry)
-            pluginsEnabled[entry.name] = entry.enabled
-            pluginsModel.items = ArrayList(plugins)
+            local.plugins.add(entry)
+            local.pluginsEnabled[entry.name] = entry.enabled
+            pluginsModel.items = ArrayList(local.plugins)
             selectLast(pluginsTable)
         }
     }
@@ -259,17 +327,17 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         val selected = pluginsTable.selectedObject(pluginsModel) ?: return
         val idx = pluginsTable.selectedRow
         val dialog = PluginsDialog(
-            currentNames = plugins.map { it.name },
-            availableRepositories = repositories,
+            currentNames = local.plugins.map { it.name },
+            availableRepositories = local.repositories,
             initial = selected,
-            enabledInitial = pluginsEnabled[selected.name] ?: selected.enabled,
+            enabledInitial = local.pluginsEnabled[selected.name] ?: selected.enabled,
         )
 
         if (dialog.showAndGet()) {
             val updated = dialog.getResult() ?: return
-            plugins[idx] = updated
-            pluginsEnabled[updated.name] = updated.enabled
-            pluginsModel.items = ArrayList(plugins)
+            local.plugins[idx] = updated
+            local.pluginsEnabled[updated.name] = updated.enabled
+            pluginsModel.items = ArrayList(local.plugins)
             pluginsTable.selectionModel.setSelectionInterval(idx, idx)
         }
     }
@@ -278,13 +346,13 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     private fun onRemovePlugin() {
         val idx = pluginsTable.selectedRow
         if (idx >= 0) {
-            val plugin = plugins[idx]
+            val plugin = local.plugins[idx]
             if (plugin.name in DefaultState.pluginMap) {
                 return
             }
-            plugins.removeAt(idx)
-            pluginsEnabled.remove(plugin.name)
-            pluginsModel.items = ArrayList(plugins)
+            local.plugins.removeAt(idx)
+            local.pluginsEnabled.remove(plugin.name)
+            pluginsModel.items = ArrayList(local.plugins)
         }
     }
     // endregion

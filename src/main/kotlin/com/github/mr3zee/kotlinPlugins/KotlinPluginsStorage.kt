@@ -163,6 +163,8 @@ class KotlinPluginsStorage(
             actualizerJobs.clear()
             logger.debug("Storage closed")
         }
+
+        project.service<KotlinPluginsExceptionAnalyzer>().start()
     }
 
     fun runActualization() {
