@@ -33,6 +33,11 @@
                 factoryClass="com.github.mr3zee.kotlinPlugins.KotlinPluginsToolWindowFactory"
         />
 
+        <projectService
+                serviceInterface="com.github.mr3zee.kotlinPlugins.KotlinPluginsExceptionReporter"
+                serviceImplementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsExceptionReporterImpl"
+        />
+
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core"
                            displayName="kotlinx-rpc"/>
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend"

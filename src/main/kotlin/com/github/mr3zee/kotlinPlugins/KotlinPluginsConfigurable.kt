@@ -64,7 +64,7 @@ private class LocalState {
     }
 
     fun applyTo(
-        analyzer: KotlinPluginsExceptionAnalyzerState,
+        analyzer: KotlinPluginsExceptionAnalyzerService,
         tree: TreeState,
         settings: KotlinPluginsSettings,
     ) {
@@ -74,7 +74,7 @@ private class LocalState {
 
         settings.updateToNewState(repositories, enabledPlugins)
 
-        analyzer.enabled = exceptionAnalyzerEnabled
+        analyzer.updateState(exceptionAnalyzerEnabled)
         tree.showClearCachesDialog = showCacheClearConfirmationDialog
     }
 
@@ -233,7 +233,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
     override fun isModified(): Boolean {
         val settingState = project.service<KotlinPluginsSettings>().safeState()
-        val analyzerState = project.service<KotlinPluginsExceptionAnalyzer>().state
+        val analyzerState = project.service<KotlinPluginsExceptionAnalyzerService>().state
         val treeState = project.service<KotlinPluginTreeStateService>().state
 
         return local.isModified(analyzerState, treeState, settingState)
@@ -241,7 +241,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
     override fun apply() {
         val settings = project.service<KotlinPluginsSettings>()
-        val analyzer = project.service<KotlinPluginsExceptionAnalyzer>().state
+        val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
         val treeState = project.service<KotlinPluginTreeStateService>().state
 
         local.applyTo(analyzer, treeState, settings)
@@ -249,7 +249,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
     override fun reset() {
         val settings = project.service<KotlinPluginsSettings>().safeState()
-        val analyzer = project.service<KotlinPluginsExceptionAnalyzer>().state
+        val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>().state
         val treeState = project.service<KotlinPluginTreeStateService>().state
 
         local.reset(analyzer, treeState, settings)

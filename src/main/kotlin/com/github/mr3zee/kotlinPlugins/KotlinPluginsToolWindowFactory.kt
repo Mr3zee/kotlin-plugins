@@ -164,7 +164,11 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
         group.addSeparator()
 
-        group.add(object : ToggleAction("Show Successful", "Show items with 'Success' status", AllIcons.RunConfigurations.ShowPassed) {
+        group.add(object : ToggleAction(
+            "Show Successful",
+            "Show items with 'Success' status",
+            AllIcons.RunConfigurations.ShowPassed,
+        ) {
             override fun getActionUpdateThread(): ActionUpdateThread {
                 return ActionUpdateThread.EDT
             }
@@ -176,10 +180,15 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
             }
         })
 
-        group.add(object : ToggleAction("Show Skipped/Disabled", "Show items with 'Skipped/Disabled' status", AllIcons.RunConfigurations.ShowIgnored) {
+        group.add(object : ToggleAction(
+            "Show Skipped/Disabled",
+            "Show items with 'Skipped/Disabled' status",
+            AllIcons.RunConfigurations.ShowIgnored,
+        ) {
             override fun getActionUpdateThread(): ActionUpdateThread {
                 return ActionUpdateThread.EDT
             }
+
             override fun isSelected(e: AnActionEvent): Boolean = tree.state.showSkipped
             override fun setSelected(e: AnActionEvent, state: Boolean) {
                 tree.state.showSkipped = state
@@ -250,10 +259,16 @@ private class NodeData(
                 is ArtifactStatus.Success -> {
                     if (status.actualVersion == status.requestedVersion) {
                         addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-                        addText(" ${KotlinPluginDescriptor.VersionMatching.EXACT.toUi()}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        addText(
+                            " ${KotlinPluginDescriptor.VersionMatching.EXACT.toUi()}",
+                            SimpleTextAttributes.GRAYED_ATTRIBUTES
+                        )
                     } else {
                         addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-                        addText(" ${status.criteria.toUi()}, Requested: ${status.requestedVersion}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        addText(
+                            " ${status.criteria.toUi()}, Requested: ${status.requestedVersion}",
+                            SimpleTextAttributes.GRAYED_ATTRIBUTES
+                        )
                     }
                 }
 
@@ -288,8 +303,8 @@ class TreeState : BaseState() {
     storages = [Storage(WORKSPACE_FILE)],
 )
 class KotlinPluginTreeStateService(
-    val treeScope: CoroutineScope
-) :  SimplePersistentStateComponent<TreeState>(TreeState())
+    val treeScope: CoroutineScope,
+) : SimplePersistentStateComponent<TreeState>(TreeState())
 
 class KotlinPluginsTree(
     private val project: Project,
@@ -307,14 +322,10 @@ class KotlinPluginsTree(
         )
     )
 
-    private val scope = project.service<KotlinPluginTreeStateService>().treeScope
-
     private val model = DefaultTreeModel(rootNode)
 
     private val nodesByKey: MutableMap<String, DefaultMutableTreeNode> = mutableMapOf()
     private val connection = project.messageBus.connect()
-
-    private val storage: KotlinPluginsStorage = project.service()
 
     private val updaters = Channel<() -> Unit>(Channel.UNLIMITED)
 
@@ -350,7 +361,7 @@ class KotlinPluginsTree(
     private fun reset() {
         nodesByKey.clear()
         redrawModel()
-        storage.requestStatuses()
+        project.service<KotlinPluginsStorage>().requestStatuses()
     }
 
     private fun redrawModel() {
@@ -503,21 +514,22 @@ class KotlinPluginsTree(
     private val logger = thisLogger()
 
     private fun startUpdatingUi() {
-        updaterJob = scope.launch(Dispatchers.EDT + CoroutineName("KotlinPluginsTreeUpdater")) {
-            while (true) {
-                val updater = updaters.receiveCatching().getOrNull() ?: break
+        updaterJob = project.service<KotlinPluginTreeStateService>().treeScope
+            .launch(Dispatchers.EDT + CoroutineName("KotlinPluginsTreeUpdater")) {
+                while (true) {
+                    val updater = updaters.receiveCatching().getOrNull() ?: break
 
-                try {
-                    updater.invoke()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: ProcessCanceledException) {
-                    throw e
-                } catch (e: Throwable) {
-                    logger.error("Error while updating Tree UI", e)
+                    try {
+                        updater.invoke()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: ProcessCanceledException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        logger.error("Error while updating Tree UI", e)
+                    }
                 }
             }
-        }
     }
 
     private fun updatePlugin(pluginName: String, status: ArtifactStatus) {
@@ -630,9 +642,11 @@ fun nodeKey(pluginName: String, mavenId: String? = null, version: String? = null
         version != null -> {
             "$pluginName::$mavenId::$version"
         }
+
         mavenId != null -> {
             "$pluginName::$mavenId"
         }
+
         else -> {
             pluginName
         }
@@ -714,6 +728,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
                         "criteria: ${status.criteria}"
             }
         }
+
         ArtifactStatus.InProgress -> "Version is loading/refreshing"
         is ArtifactStatus.FailedToLoad -> "Version failed to load: ${status.shortMessage} (click for more details)"
         ArtifactStatus.ExceptionInRuntime -> "Version threw an exception during runtime (click for more details)"
