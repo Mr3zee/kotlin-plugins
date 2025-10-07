@@ -1,6 +1,8 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.options.Configurable
@@ -10,28 +12,42 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.emptyText
+import com.intellij.openapi.ui.popup.Balloon
+import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.ToolbarDecorator
+import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBRadioButton
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.dsl.builder.actionButton
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.ListTableModel
 import java.awt.BorderLayout
 import java.awt.Dimension
-import javax.swing.*
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
+import javax.swing.Box
+import javax.swing.BoxLayout
+import javax.swing.ButtonGroup
+import javax.swing.DefaultComboBoxModel
+import javax.swing.JComponent
+import javax.swing.JPanel
+import javax.swing.SwingConstants
 import javax.swing.table.TableRowSorter
 
 private class LocalState {
     val repositories: MutableList<KotlinArtifactsRepository> = mutableListOf()
     val plugins: MutableList<KotlinPluginDescriptor> = mutableListOf()
     val pluginsEnabled: MutableMap<String, Boolean> = mutableMapOf()
-    var exceptionAnalyzerEnabled: Boolean = false
     var showCacheClearConfirmationDialog: Boolean = true
+    var exceptionAnalyzerEnabled: Boolean = false
+    var autoDiablePlugins: Boolean = false
 
     fun isModified(
         analyzer: KotlinPluginsExceptionAnalyzerState,
@@ -42,7 +58,8 @@ private class LocalState {
                 plugins != settings.plugins ||
                 pluginsEnabled != settings.pluginsEnabled ||
                 exceptionAnalyzerEnabled != analyzer.enabled ||
-                showCacheClearConfirmationDialog != tree.showClearCachesDialog
+                showCacheClearConfirmationDialog != tree.showClearCachesDialog ||
+                autoDiablePlugins != analyzer.autoDisable
     }
 
     fun reset(
@@ -61,6 +78,7 @@ private class LocalState {
 
         exceptionAnalyzerEnabled = analyzer.enabled
         showCacheClearConfirmationDialog = tree.showClearCachesDialog
+        autoDiablePlugins = analyzer.autoDisable
     }
 
     fun applyTo(
@@ -74,7 +92,7 @@ private class LocalState {
 
         settings.updateToNewState(repositories, enabledPlugins)
 
-        analyzer.updateState(exceptionAnalyzerEnabled)
+        analyzer.updateState(exceptionAnalyzerEnabled, autoDiablePlugins)
         tree.showClearCachesDialog = showCacheClearConfirmationDialog
     }
 
@@ -89,8 +107,10 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     private lateinit var pluginsTable: JBTable
     private lateinit var repoModel: ListTableModel<KotlinArtifactsRepository>
     private lateinit var pluginsModel: ListTableModel<KotlinPluginDescriptor>
-    private lateinit var analyzerCheckBox: JBCheckBox
+
     private lateinit var clearCachesCheckBox: JBCheckBox
+    private lateinit var enableAnalyzerCheckBox: JBCheckBox
+    private lateinit var autoDisablePluginsCheckBox: JBCheckBox
 
     private var rootPanel: JPanel? = null
 
@@ -99,18 +119,29 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     override fun createComponent(): JComponent {
         if (rootPanel != null) return rootPanel as JPanel
 
-        analyzerCheckBox = JBCheckBox(
-            "Enable Kotlin plugin exception analyzer",
-            local.exceptionAnalyzerEnabled,
-        ).apply {
-            addItemListener { local.exceptionAnalyzerEnabled = isSelected }
-        }
-
         clearCachesCheckBox = JBCheckBox(
             "Show confirmation dialog when clearing caches",
             local.showCacheClearConfirmationDialog,
         ).apply {
             addItemListener { local.showCacheClearConfirmationDialog = isSelected }
+        }
+
+        enableAnalyzerCheckBox = JBCheckBox(
+            "Enable Kotlin plugin exception analyzer",
+            local.exceptionAnalyzerEnabled,
+        ).apply {
+            addItemListener {
+                local.exceptionAnalyzerEnabled = isSelected
+                autoDisablePluginsCheckBox.isEnabled = isSelected
+            }
+        }
+
+        autoDisablePluginsCheckBox = JBCheckBox(
+            "Automatically disable throwing plugins",
+            local.autoDiablePlugins,
+        ).apply {
+            isEnabled = enableAnalyzerCheckBox.isSelected
+            addItemListener { local.autoDiablePlugins = isSelected }
         }
 
         // Tables and models
@@ -138,7 +169,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
                 override fun getColumnClass(): Class<*> = java.lang.Boolean::class.java
 
-                override fun valueOf(item: KotlinPluginDescriptor): Boolean = local.pluginsEnabled[item.name] ?: item.enabled
+                override fun valueOf(item: KotlinPluginDescriptor): Boolean =
+                    local.pluginsEnabled[item.name] ?: item.enabled
 
                 override fun isCellEditable(item: KotlinPluginDescriptor?): Boolean = true
 
@@ -205,11 +237,54 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             }
             .createPanel()
 
-        val content = JPanel(BorderLayout())
-        val form = FormBuilder.createFormBuilder()
-            .addComponent(analyzerCheckBox)
-            .addComponent(clearCachesCheckBox)
-            .addSeparator(5)
+        val generalContent = JPanel(BorderLayout())
+
+        val kotlinVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+
+        val generalForm = panel {
+            row {
+                val copyKotlinAction = object : AnAction(AllIcons.Actions.Copy) {
+                    override fun actionPerformed(e: AnActionEvent) {
+                        val selection = StringSelection(kotlinVersion)
+                        Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
+
+                        JBPopupFactory.getInstance()
+                            .createBalloonBuilder(JBLabel("Version copied to clipboard"))
+                            .createBalloon()
+                            .show(
+                                RelativePoint.getSouthOf(e.inputEvent?.component as JComponent),
+                                Balloon.Position.below
+                            )
+                    }
+                }
+
+                actionButton(copyKotlinAction)
+                    .label("<html>Kotlin Compiler IDE version: <strong>$kotlinVersion</strong></html>")
+            }
+
+            group("Exception Analyzer") {
+                row {
+                    cell(enableAnalyzerCheckBox)
+                }
+
+                indent {
+                    row {
+                        cell(autoDisablePluginsCheckBox)
+                    }
+                }
+            }
+
+            group("Other") {
+                row {
+                    cell(clearCachesCheckBox)
+                }
+            }
+        }
+
+        generalContent.add(generalForm, BorderLayout.NORTH)
+
+        val artifactsContent = JPanel(BorderLayout())
+        val artifactsForm = FormBuilder.createFormBuilder()
             .addLabeledComponent(
                 /* label = */ JBLabel("Maven repositories", AllIcons.Nodes.Folder, SwingConstants.LEADING),
                 /* component = */ repoPanel,
@@ -223,10 +298,11 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 /* labelOnTop = */ true,
             )
             .panel
-        content.add(form, BorderLayout.NORTH)
+        artifactsContent.add(artifactsForm, BorderLayout.NORTH)
 
         val tabs = JBTabbedPane()
-        tabs.addTab("Settings", content)
+        tabs.addTab("General", generalContent)
+        tabs.addTab("Artifacts", artifactsContent)
         rootPanel = JPanel(BorderLayout()).apply { add(tabs, BorderLayout.NORTH) }
 
         reset() // initialise from a persisted state
@@ -259,8 +335,10 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         repoModel.items = ArrayList(local.repositories)
         pluginsModel.items = ArrayList(local.plugins)
 
-        analyzerCheckBox.isSelected = local.exceptionAnalyzerEnabled
         clearCachesCheckBox.isSelected = local.showCacheClearConfirmationDialog
+        enableAnalyzerCheckBox.isSelected = local.exceptionAnalyzerEnabled
+        autoDisablePluginsCheckBox.isEnabled = enableAnalyzerCheckBox.isSelected
+        autoDisablePluginsCheckBox.isSelected = local.autoDiablePlugins
     }
 
     // region Repository actions
@@ -716,7 +794,7 @@ private class PluginsDialog(
 
         return KotlinPluginDescriptor(
             name = nameField.text.trim(),
-            ids = mutableIds.map { MavenId( it) },
+            ids = mutableIds.map { MavenId(it) },
             versionMatching = versionMatchingMap.getValue(versionMatchingField.model.selectedItem as String),
             enabled = enabledCheckbox.isSelected,
             repositories = selectedRepos,

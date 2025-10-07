@@ -23,6 +23,7 @@ import java.util.logging.LogRecord
 
 class KotlinPluginsExceptionAnalyzerState : BaseState() {
     var enabled by property(false)
+    var autoDisable by property(false)
 }
 
 @Service(Service.Level.PROJECT)
@@ -115,7 +116,9 @@ class KotlinPluginsExceptionAnalyzerService(
         startHandler()
     }
 
-    fun updateState(enabled: Boolean) {
+    fun updateState(enabled: Boolean, autoDisable: Boolean) {
+        state.autoDisable = autoDisable
+
         if (state.enabled == enabled) {
             return
         }

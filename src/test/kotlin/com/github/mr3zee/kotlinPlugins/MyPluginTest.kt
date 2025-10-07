@@ -294,7 +294,7 @@ class MyPluginTest : BasePlatformTestCase() {
         }
 
         project.replaceService(KotlinPluginsExceptionReporter::class.java, reporter, project)
-        project.service<KotlinPluginsExceptionAnalyzerService>().updateState(true)
+        project.service<KotlinPluginsExceptionAnalyzerService>().updateState(enabled = true, autoDisable = true)
         val logger = thisLogger()
 
         logger.debug("Starting tailing log file")
