@@ -280,11 +280,13 @@ class MyPluginTest : BasePlatformTestCase() {
         var tooMany = false
 
         val reporter = object : KotlinPluginsExceptionReporter {
-            override suspend fun lookFor(): Map<String, Set<String>> {
-                return mapOf("kotlinx-rpc" to setOf(DetectorClass::class.qualifiedName!!))
+            override fun start() { }
+
+            override suspend fun lookFor(): Map<JarId, Set<String>> {
+                return mapOf(JarId("kotlinx-rpc", "come") to setOf(DetectorClass::class.qualifiedName!!))
             }
 
-            override fun matched(id: String, exception: Throwable) {
+            override fun matched(id: JarId, exception: Throwable, cutoutIndex: Int) {
                 if (!matched.complete(exception)) {
                     tooMany = true
                 }

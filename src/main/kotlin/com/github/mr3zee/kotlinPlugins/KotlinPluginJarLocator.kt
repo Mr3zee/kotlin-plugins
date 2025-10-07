@@ -605,7 +605,7 @@ internal object KotlinPluginJarLocator {
 private const val FOR_IDE_CLASSIFIER = "for-ide"
 private const val DOWNLOADING_EXTENSION = "downloading"
 
-class MatchFilter(
+data class MatchFilter(
     val version: String,
     val matching: KotlinPluginDescriptor.VersionMatching,
 )

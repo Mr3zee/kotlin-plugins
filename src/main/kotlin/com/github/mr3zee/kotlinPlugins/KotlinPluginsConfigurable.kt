@@ -89,6 +89,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     private lateinit var pluginsTable: JBTable
     private lateinit var repoModel: ListTableModel<KotlinArtifactsRepository>
     private lateinit var pluginsModel: ListTableModel<KotlinPluginDescriptor>
+    private lateinit var analyzerCheckBox: JBCheckBox
+    private lateinit var clearCachesCheckBox: JBCheckBox
 
     private var rootPanel: JPanel? = null
 
@@ -97,14 +99,14 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     override fun createComponent(): JComponent {
         if (rootPanel != null) return rootPanel as JPanel
 
-        val analyzerCheckBox = JBCheckBox(
+        analyzerCheckBox = JBCheckBox(
             "Enable Kotlin plugin exception analyzer",
             local.exceptionAnalyzerEnabled,
         ).apply {
             addItemListener { local.exceptionAnalyzerEnabled = isSelected }
         }
 
-        val clearCachesCheckBox = JBCheckBox(
+        clearCachesCheckBox = JBCheckBox(
             "Show confirmation dialog when clearing caches",
             local.showCacheClearConfirmationDialog,
         ).apply {
@@ -256,6 +258,9 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
         repoModel.items = ArrayList(local.repositories)
         pluginsModel.items = ArrayList(local.plugins)
+
+        analyzerCheckBox.isSelected = local.exceptionAnalyzerEnabled
+        clearCachesCheckBox.isSelected = local.showCacheClearConfirmationDialog
     }
 
     // region Repository actions

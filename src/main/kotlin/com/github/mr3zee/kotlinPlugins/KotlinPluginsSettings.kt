@@ -8,6 +8,7 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.jetbrains.rd.util.ConcurrentHashMap
 import java.nio.file.Path
 import kotlin.collections.distinctBy
 
@@ -30,7 +31,7 @@ class KotlinPluginsSettings(
 ) {
     private val logger by lazy { thisLogger() }
 
-    private val onUpdateHooks: MutableMap<String, () -> Unit> = mutableMapOf()
+    private val onUpdateHooks: ConcurrentHashMap<String, () -> Unit> = ConcurrentHashMap()
 
     fun addOnUpdateHook(key: String, hook: () -> Unit) {
         onUpdateHooks[key] = hook

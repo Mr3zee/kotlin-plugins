@@ -54,6 +54,7 @@ class KotlinPluginsExceptionAnalyzerService(
                 return
             }
 
+            project.service<KotlinPluginsExceptionReporter>().start()
             exceptionHandler.start()
             logger.debug("Exception analyzer started")
             rootLogger().addHandler(exceptionHandler)
@@ -63,7 +64,7 @@ class KotlinPluginsExceptionAnalyzerService(
     private inner class ExceptionHandler : Handler() {
         private val channel = Channel<Throwable>(Channel.UNLIMITED)
         private val job = scope.launch(
-            context = CoroutineName("exception-analyzer") + supervisorJob,
+            context = supervisorJob + CoroutineName("exception-analyzer"),
             start = CoroutineStart.LAZY,
         ) {
             while (true) {
@@ -78,7 +79,7 @@ class KotlinPluginsExceptionAnalyzerService(
 
                     if (indexOfLast != -1) {
                         logger.debug("Exception detected for $mavenId: ${exception.message}")
-                        reporter.matched(mavenId, exception)
+                        reporter.matched(mavenId, exception, indexOfLast)
                     }
                 }
             }
