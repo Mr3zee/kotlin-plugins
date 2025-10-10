@@ -1,9 +1,11 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.intellij.ui.EditorNotifications
 import com.jetbrains.rd.util.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -24,7 +26,9 @@ interface KotlinPluginsExceptionReporter {
 
     suspend fun lookFor(): Map<JarId, Set<String>>
 
-    fun matched(id: JarId, exception: Throwable, cutoutIndex: Int)
+    fun matched(id: JarId, exception: Throwable, cutoutIndex: Int, autoDisable: Boolean)
+
+    fun hasExceptions(pluginName: String, mavenId: String): Boolean
 }
 
 class KotlinPluginsExceptionReporterImpl(
@@ -34,17 +38,18 @@ class KotlinPluginsExceptionReporterImpl(
     private val logger by lazy { thisLogger() }
 
     private val connection by lazy { project.messageBus.connect(scope) }
+    private val statusPublisher by lazy { project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC) }
     private var job: Job? = null
     private val initialized = CompletableDeferred<Unit>()
 
-    private val map = ConcurrentHashMap<JarId, Set<String>>()
+    private val stackTraceMap = ConcurrentHashMap<JarId, Set<String>>()
 
     private val processingQueue = Channel<KotlinPluginDiscoveryUpdater.Discovery>(Channel.UNLIMITED)
 
     override fun dispose() {
         connection.disconnect()
         job?.cancel()
-        map.clear()
+        stackTraceMap.clear()
         processingQueue.close()
         processingQueue.cancel()
     }
@@ -54,7 +59,7 @@ class KotlinPluginsExceptionReporterImpl(
             return
         }
 
-        map.clear()
+        stackTraceMap.clear()
 
         connection.subscribe(KotlinPluginDiscoveryUpdater.TOPIC, DiscoveryHandler())
 
@@ -91,11 +96,11 @@ class KotlinPluginsExceptionReporterImpl(
 
     private fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
         val jarId = JarId(discovery.pluginName, discovery.mavenId)
-        map.remove(jarId)
+        stackTraceMap.remove(jarId)
 
         when (val result = KotlinPluginsJarAnalyzer.analyze(discovery.jar)) {
             is KotlinPluginsAnalyzedJar.Success -> {
-                map[jarId] = result.fqNames
+                stackTraceMap[jarId] = result.fqNames
             }
 
             is KotlinPluginsAnalyzedJar.Failure -> {
@@ -111,21 +116,67 @@ class KotlinPluginsExceptionReporterImpl(
 
         initialized.await()
 
-        return map
+        return stackTraceMap
     }
 
-    override fun matched(id: JarId, exception: Throwable, cutoutIndex: Int) {
-        println("exception detected for $id: ${exception.message} at index $cutoutIndex")
+    private val caughtExceptions = mutableMapOf<String, List<CaughtException>>()
+
+    private class CaughtException(
+        val mavenId: String,
+        val exception: Throwable,
+        val cutoutIndex: Int,
+    )
+
+    override fun matched(id: JarId, exception: Throwable, cutoutIndex: Int, autoDisable: Boolean) {
+        val settings = project.service<KotlinPluginsSettings>()
+        val plugin = settings.pluginByName(id.pluginName) ?: return
+
+        // store anyway to display in UI
+        caughtExceptions.compute(id.pluginName) { _, old ->
+            (old.orEmpty() + CaughtException(id.mavenId, exception, cutoutIndex)).let { new ->
+                new.drop((new.size - EXCEPTIONS_CACHE_SIZE).coerceAtLeast(0))
+            }
+        }
+
+        statusPublisher.updateArtifact(id.pluginName, id.mavenId, ArtifactStatus.ExceptionInRuntime)
+
+        if (plugin.ignoreExceptions) {
+            return
+        }
+
+        if (autoDisable) {
+            settings.disablePlugins(plugin.name)
+        } else {
+            // trigger editor notification across all Kotlin files
+            project.service<KotlinPluginsNotifications>().activate(plugin.name)
+
+            ApplicationManager.getApplication().invokeLater {
+                EditorNotifications.getInstance(project).updateAllNotifications()
+            }
+        }
+    }
+
+    override fun hasExceptions(pluginName: String, mavenId: String): Boolean {
+        return caughtExceptions[pluginName].orEmpty().any { it.mavenId == mavenId }
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
         override fun discovered(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
             processingQueue.trySend(discovery)
+
+            caughtExceptions.compute(discovery.pluginName) { _, old ->
+                old.orEmpty().filterNot { it.mavenId == discovery.mavenId }
+            }
         }
 
         override fun reset() {
             job?.cancel()
-            map.clear()
+            stackTraceMap.clear()
+            caughtExceptions.clear()
         }
+    }
+
+    companion object {
+        const val EXCEPTIONS_CACHE_SIZE = 20
     }
 }

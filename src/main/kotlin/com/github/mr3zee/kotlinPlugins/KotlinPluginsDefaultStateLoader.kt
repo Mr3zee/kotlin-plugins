@@ -3,11 +3,11 @@ package com.github.mr3zee.kotlinPlugins
 import com.intellij.openapi.util.JDOMUtil
 import org.jdom.Element
 
-object DefaultStateLoader {
+object KotlinPluginsDefaultStateLoader {
     fun loadState(): DefaultStateEntry {
         return object : DefaultStateEntry {
             private val loadedXml by lazy {
-                val resource = requireNotNull(DefaultStateLoader::class.java.classLoader.getResource("defaults.xml")) {
+                val resource = requireNotNull(KotlinPluginsDefaultStateLoader::class.java.classLoader.getResource("defaults.xml")) {
                     "Failed to load defaults.xml resource"
                 }
 
@@ -110,6 +110,7 @@ object DefaultStateLoader {
                 versionMatching = versionMatching,
                 repositories = repoRefs,
                 enabled = true,
+                ignoreExceptions = false,
             )
         }
     }

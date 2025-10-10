@@ -4,5 +4,5 @@ import com.intellij.openapi.util.IconLoader
 
 @Suppress("unused")
 object KotlinPluginsIcons {
-    val RefreshChanges = IconLoader.getIcon("/icons/refreshPlugins.svg", javaClass)
+    val Logo = IconLoader.getIcon("/icons/logo.svg", javaClass)
 }

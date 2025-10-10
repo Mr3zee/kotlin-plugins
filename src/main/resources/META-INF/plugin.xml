@@ -38,6 +38,10 @@
                 serviceImplementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsExceptionReporterImpl"
         />
 
+        <editorNotificationProvider
+                implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsEditorNotificationProvider"
+        />
+
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core"
                            displayName="kotlinx-rpc"/>
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend"

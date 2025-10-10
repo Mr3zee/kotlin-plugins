@@ -22,7 +22,7 @@ import java.util.logging.Handler
 import java.util.logging.LogRecord
 
 class KotlinPluginsExceptionAnalyzerState : BaseState() {
-    var enabled by property(false)
+    var enabled by property(true)
     var autoDisable by property(false)
 }
 
@@ -80,7 +80,7 @@ class KotlinPluginsExceptionAnalyzerService(
 
                     if (indexOfLast != -1) {
                         logger.debug("Exception detected for $mavenId: ${exception.message}")
-                        reporter.matched(mavenId, exception, indexOfLast)
+                        reporter.matched(mavenId, exception, indexOfLast, autoDisable = state.autoDisable)
                     }
                 }
             }

@@ -21,6 +21,7 @@ import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.SimpleToolWindowPanel
@@ -51,7 +52,7 @@ import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import kotlin.coroutines.cancellation.CancellationException
 
-class KotlinPluginsToolWindowFactory : ToolWindowFactory {
+class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(
         project: Project,
         toolWindow: ToolWindow,
@@ -66,10 +67,10 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
         val (panel, tree) = createDiagnosticsPanel(project, state)
 
         val splitter = OnePixelSplitter(
-            false,
-            PROPORTION_KEY,
-            0.3f,
-            0.7f
+            /* vertical = */ false,
+            /* proportionKey = */ PROPORTION_KEY,
+            /* minProp = */ 0.3f,
+            /* maxProp = */ 0.7f,
         ).apply {
             firstComponent = panel
             secondComponent = createPanel("Log tab is empty")
@@ -82,7 +83,6 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
         Disposer.register(content) {
             tree.dispose()
-            tree.settings.removeOnUpdateHook(TREE_HOOK_KEY)
         }
 
         contentManager.addContent(content)
@@ -103,10 +103,6 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
         val settings = project.service<KotlinPluginsSettings>()
 
         val tree = KotlinPluginsTree(project, state, settings)
-
-        settings.addOnUpdateHook(TREE_HOOK_KEY) {
-            tree.updater.reset()
-        }
 
         val scrollPane = ScrollPaneFactory
             .createScrollPane(
@@ -147,8 +143,6 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
             override fun actionPerformed(e: AnActionEvent) {
                 e.project?.service<KotlinPluginsStorage>()?.runActualization()
-
-                tree.updater.redraw()
             }
         })
 
@@ -158,7 +152,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
             }
 
             override fun actionPerformed(e: AnActionEvent) {
-                e.project?.service<KotlinPluginsStorage>()?.invalidateKotlinPluginCache()
+                e.project?.service<KotlinPluginsStorage>()?.clearState()
             }
         })
 
@@ -222,7 +216,6 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory {
 
     companion object {
         const val DISPLAY_NAME = "Kotlin Plugins Diagnostics"
-        const val TREE_HOOK_KEY = "KotlinPluginsTree"
         const val PROPORTION_KEY = "KotlinPlugins.Proportion"
     }
 }

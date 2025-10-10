@@ -39,7 +39,7 @@ sealed interface LocatorResult {
         val filter: MatchFilter,
         override val libVersion: String,
     ) : LocatorResult {
-        override val state = ArtifactState.Cached(jar.path, filter.version, libVersion, filter.matching)
+        override val state: ArtifactState.Cached = ArtifactState.Cached(jar.path, filter.version, libVersion, filter.matching)
     }
 
     class FailedToFetch(
@@ -166,7 +166,7 @@ internal object KotlinPluginJarLocator {
 
             manifestResult as ManifestResult.Found
 
-            logger.debug("$logTag Found ${manifestResult.versions.size} versions for ${artifact.artifactId}:$kotlinIdeVersion: $manifestResult")
+            logger.trace("$logTag Found ${manifestResult.versions.size} versions for ${artifact.artifactId}:$kotlinIdeVersion: $manifestResult")
 
             val locatorResult = locateArtifactByManifest(
                 logTag = logTag,
@@ -354,7 +354,7 @@ internal object KotlinPluginJarLocator {
             return LocatorResult.Cached(
                 jar = Jar(
                     path = finalFilename,
-                    isNew = false
+                    isNew = false,
                 ),
                 filter = manifest.matchFilter,
                 libVersion = libVersion,
