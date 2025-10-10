@@ -702,6 +702,7 @@ private class PluginsDialog(
     }
 
     private val enabledCheckbox = JBCheckBox("Enable this plugin in the project", enabledInitial)
+    private val ignoreExceptionsCheckbox = JBCheckBox("Ignore plugin exceptions", initial?.ignoreExceptions ?: false)
 
     private val repoCheckboxes: List<JBCheckBox> = availableRepositories.map { repo ->
         JBCheckBox(repo.name, initial?.repositories?.any { it.name == repo.name } == true).apply {
@@ -739,6 +740,7 @@ private class PluginsDialog(
             .addLabeledComponent(JBLabel("Version matching:"), versionMatchingField)
             .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10)
             .addComponent(enabledCheckbox)
+            .addComponent(ignoreExceptionsCheckbox)
             .panel
 
         form.preferredSize = Dimension(650, 0)
@@ -797,6 +799,7 @@ private class PluginsDialog(
             ids = mutableIds.map { MavenId(it) },
             versionMatching = versionMatchingMap.getValue(versionMatchingField.model.selectedItem as String),
             enabled = enabledCheckbox.isSelected,
+            ignoreExceptions = ignoreExceptionsCheckbox.isSelected,
             repositories = selectedRepos,
         )
     }

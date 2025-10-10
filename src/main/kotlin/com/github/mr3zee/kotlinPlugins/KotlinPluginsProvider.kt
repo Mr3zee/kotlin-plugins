@@ -25,10 +25,17 @@ class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
         val plugins = project.service<KotlinPluginsSettings>().safeState().plugins
 
         return plugins.filter { it.enabled }.firstNotNullOfOrNull { descriptor ->
-            val urls = descriptor.ids.map { it to "${it.groupId}/${it.artifactId}/" }
+            val urls = descriptor.ids.map {
+                it to listOf(
+                    "${it.getPluginGroupPath()}/${it.artifactId}/",
+                    "${it.groupId}/${it.artifactId}/",
+                )
+            }
 
-            urls.firstOrNull { (_, url) ->
-                stringPath.contains("/$url") || stringPath.startsWith(url)
+            urls.firstOrNull { (_, urlVariations) ->
+                urlVariations.any { url ->
+                    stringPath.contains("/$url") || stringPath.startsWith(url)
+                }
             }?.let { (id, _) ->
                 val coreVersion = SEMVER_REGEX.findAll(name).lastOrNull()?.value
                     ?: run {

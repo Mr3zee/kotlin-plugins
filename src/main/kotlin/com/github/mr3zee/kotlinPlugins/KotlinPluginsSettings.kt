@@ -8,7 +8,6 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
-import com.jetbrains.rd.util.ConcurrentHashMap
 import java.nio.file.Path
 import kotlin.collections.distinctBy
 
@@ -31,16 +30,6 @@ class KotlinPluginsSettings(
 ) {
     private val logger by lazy { thisLogger() }
 
-    private val onUpdateHooks: ConcurrentHashMap<String, () -> Unit> = ConcurrentHashMap()
-
-    fun addOnUpdateHook(key: String, hook: () -> Unit) {
-        onUpdateHooks[key] = hook
-    }
-
-    fun removeOnUpdateHook(key: String) {
-        onUpdateHooks.remove(key)
-    }
-
     private fun updateWithDetectChanges(updateFunction: (currentState: State) -> State): State {
         val currentState = state
 
@@ -49,8 +38,7 @@ class KotlinPluginsSettings(
         }
 
         if (currentState != newState) {
-            project.service<KotlinPluginsStorage>().clearCaches()
-            onUpdateHooks.values.forEach { it() }
+            project.service<KotlinPluginsStorage>().clearState()
         }
 
         return newState.asState()
@@ -73,6 +61,20 @@ class KotlinPluginsSettings(
 
     fun pluginByName(name: String): KotlinPluginDescriptor? {
         return safeState().plugins.find { it.name == name }
+    }
+
+    fun disablePlugins(vararg pluginNames: String) {
+        disablePlugins(pluginNames.toSet())
+    }
+
+    fun disablePlugins(pluginNames: Set<String>) {
+        updateWithDetectChanges {
+            it.copy(
+                plugins = it.plugins.map { p ->
+                    if (p.name in pluginNames) p.copy(enabled = false) else p
+                }
+            )
+        }
     }
 
     fun updateToNewState(
@@ -116,6 +118,7 @@ data class KotlinPluginDescriptor(
     val ids: List<MavenId>,
     val versionMatching: VersionMatching,
     val enabled: Boolean,
+    val ignoreExceptions: Boolean,
     val repositories: List<KotlinArtifactsRepository>,
 ) {
     enum class VersionMatching {
@@ -144,7 +147,8 @@ private fun KotlinPluginsSettings.State.distinct(): KotlinPluginsSettings.State 
         val defaultPlugin = DefaultState.pluginMap[it.name]
         defaultPlugin != null && (it.repositories != defaultPlugin.repositories ||
                 it.versionMatching != defaultPlugin.versionMatching ||
-                it.enabled != defaultPlugin.enabled)
+                it.enabled != defaultPlugin.enabled ||
+                it.ignoreExceptions != defaultPlugin.ignoreExceptions)
     }.associateBy { it.name }.mapValues { (k, v) ->
         v.copy(
             repositories = (DefaultState.pluginMap[k]!!.repositories + v.repositories).distinctBy { it.name },
@@ -174,7 +178,7 @@ private fun KotlinPluginsSettings.State.asStored(): KotlinPluginsSettings.Stored
             "${v.value};${v.type.name}"
         },
         plugins = plugins.associateBy { it.name }.mapValues { (_, v) ->
-            "${v.versionMatching.name};${v.enabled};${v.ids.joinToString(";") { it.id }}"
+            "${v.versionMatching.name};${v.enabled};${v.ignoreExceptions};${v.ids.joinToString(";") { it.id }}"
         },
         pluginsRepos = plugins.associateBy { it.name }.mapValues { (_, v) ->
             v.repositories.joinToString(";") { it.name }
@@ -202,7 +206,8 @@ fun KotlinPluginsSettings.StoredState.asState(): KotlinPluginsSettings.State {
                 KotlinPluginDescriptor.VersionMatching.entries.find { it.name == enumName }
             } ?: return@mapNotNull null
             val enabled = list.getOrNull(1)?.toBooleanStrictOrNull() ?: return@mapNotNull null
-            val coordinates = list.drop(2).mapNotNull {
+            val ignoreExceptions = list.getOrNull(2)?.toBooleanStrictOrNull() ?: return@mapNotNull null
+            val coordinates = list.drop(3).mapNotNull {
                 if (mavenRegex.matches(it)) {
                     MavenId(it)
                 } else null
@@ -213,6 +218,7 @@ fun KotlinPluginsSettings.StoredState.asState(): KotlinPluginsSettings.State {
                 ids = coordinates,
                 versionMatching = versionMatching,
                 enabled = enabled,
+                ignoreExceptions = ignoreExceptions,
                 repositories = pluginsRepos[name].orEmpty().split(";").mapNotNull { repoByNames[it] }
             )
         },
@@ -224,7 +230,7 @@ interface DefaultStateEntry {
     val plugins: List<KotlinPluginDescriptor>
 }
 
-object DefaultState : DefaultStateEntry by DefaultStateLoader.loadState() {
+object DefaultState : DefaultStateEntry by KotlinPluginsDefaultStateLoader.loadState() {
     val repositoryMap = repositories.associateBy { it.name }
     val pluginMap = plugins.associateBy { it.name }
 }

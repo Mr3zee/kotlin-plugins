@@ -139,22 +139,41 @@ class KotlinPluginsStorage(
         project.messageBus.syncPublisher(KotlinPluginDiscoveryUpdater.TOPIC)
     }
 
+    private suspend inline fun internalClearStateNoInvalidate(and: () -> Unit = {}) {
+        try {
+            while (true) {
+                actualizerJobs.values.forEach { it.cancelAndJoin() }
+                if (actualizerLock.tryLock()) {
+                    break
+                }
+            }
+
+            actualizerJobs.values.forEach { it.cancelAndJoin() }
+            actualizerJobs.clear()
+
+            pluginsCache.clear()
+
+            and()
+        } finally {
+            actualizerLock.unlock()
+        }
+    }
+
+    fun clearState() {
+        scope.launch(CoroutineName("clear-state")) {
+            logger.debug("Clearing state")
+
+            internalClearStateNoInvalidate {
+                invalidateKotlinPluginCache()
+            }
+        }
+    }
+
     fun clearCaches() {
         scope.launch(CoroutineName("clear-caches")) {
             logger.debug("Clearing caches")
-            try {
-                while (true) {
-                    actualizerJobs.values.forEach { it.cancelAndJoin() }
-                    if (actualizerLock.tryLock()) {
-                        break
-                    }
-                }
 
-                actualizerJobs.values.forEach { it.cancelAndJoin() }
-                actualizerJobs.clear()
-
-                pluginsCache.clear()
-
+            internalClearStateNoInvalidate {
                 cacheDir()?.let {
                     @OptIn(ExperimentalPathApi::class)
                     runCatching {
@@ -163,8 +182,6 @@ class KotlinPluginsStorage(
                 }
 
                 invalidateKotlinPluginCache()
-            } finally {
-                actualizerLock.unlock()
             }
         }
     }
@@ -209,12 +226,19 @@ class KotlinPluginsStorage(
     fun requestStatuses() {
         logger.debug("Requested statuses")
 
+        val reporter = project.service<KotlinPluginsExceptionReporter>()
         forEachState { pluginName, mavenId, libVersion, state ->
+            val status = if (state is ArtifactState.Cached && reporter.hasExceptions(pluginName, mavenId)) {
+                ArtifactStatus.ExceptionInRuntime
+            } else {
+                state.toStatus()
+            }
+
             statusPublisher.updateVersion(
                 pluginName = pluginName,
                 mavenId = mavenId,
                 version = libVersion,
-                status = state.toStatus(),
+                status = status,
             )
         }
     }
@@ -302,7 +326,16 @@ class KotlinPluginsStorage(
             failedToLocate = !bundle.allFound()
 
             bundle.locatorResults.entries.forEach { (id, locatorResult) ->
-                val status = locatorResult.state.toStatus()
+                val reporter = project.service<KotlinPluginsExceptionReporter>()
+
+                val status = if (
+                    locatorResult is LocatorResult.Cached &&
+                    reporter.hasExceptions(plugin.descriptor.name, id.id)
+                ) {
+                    ArtifactStatus.ExceptionInRuntime
+                } else {
+                    locatorResult.state.toStatus()
+                }
 
                 statusPublisher.updateVersion(
                     pluginName = descriptor.name,
@@ -311,6 +344,15 @@ class KotlinPluginsStorage(
                     status = status,
                 )
 
+                if (locatorResult is LocatorResult.Cached) {
+                    discoveryPublisher.discovered(
+                        pluginName = descriptor.name,
+                        mavenId = id.id,
+                        version = locatorResult.state.actualVersion,
+                        jar = locatorResult.jar.path,
+                    )
+                }
+
                 val artifactsMap = pluginsCache
                     .getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
                     .getOrPut(descriptor.name) { ConcurrentHashMap() }
@@ -318,13 +360,11 @@ class KotlinPluginsStorage(
                 val resolvedPlugin = ResolvedPlugin(id, locatorResult.libVersion)
 
                 artifactsMap.compute(resolvedPlugin) { _, old ->
-                    val new = locatorResult.state
-                    if (new is ArtifactState.Cached && (old == null || old is ArtifactState.Cached && old.path != new.path)) {
+                    if (locatorResult is LocatorResult.Cached && (locatorResult.jar.isNew || old !is ArtifactState.Cached)) {
                         jarChanged.compareAndSet(false, true)
-                        discoveryPublisher.discovered(descriptor.name, id.id, new.actualVersion, new.path)
                     }
 
-                    new
+                    locatorResult.state
                 }
             }
 
@@ -386,6 +426,8 @@ class KotlinPluginsStorage(
             return null
         }
 
+        logger.debug("All versions for ${requested.version} (${requested.descriptor.name}) are present")
+
         val state = paths.find { it.first == requested.artifact.id }?.second
             ?: error("Should not happen")
 
@@ -396,12 +438,17 @@ class KotlinPluginsStorage(
             status = state.toStatus(),
         )
 
-        discoveryPublisher.discovered(requested.descriptor.name, requested.artifact.id, requested.version, state.path)
+        discoveryPublisher.discovered(
+            pluginName = requested.descriptor.name,
+            mavenId = requested.artifact.id,
+            version = requested.version,
+            jar = state.path,
+        )
 
         return state.path
     }
 
-    class StoredJar(
+    private class StoredJar(
         val mavenId: String,
         val locatedVersion: String?,
         val path: Path?,
@@ -426,7 +473,7 @@ class KotlinPluginsStorage(
                 findArtifact(pluginMap, artifact, kotlinIdeVersion)
             }
 
-            logger.debug(
+            logger.trace(
                 "On disk versions for ${requested.version} (${requested.descriptor.name}): " +
                         "${paths.map { "${it.mavenId} -> ${it.path}" }}"
             )
@@ -434,6 +481,8 @@ class KotlinPluginsStorage(
             if (paths.any { it.path == null } || paths.distinctBy { it.locatedVersion }.size != 1) {
                 logger.debug("Some versions are missing for ${requested.descriptor.name} (${requested.version})")
                 scope.actualize(requested)
+
+                return@launch
             }
 
             if (paths.any { knownByIde[it.mavenId]?.path != it.path }) {
@@ -529,7 +578,7 @@ class KotlinPluginsStorage(
         return _cacheDir
     }
 
-    fun invalidateKotlinPluginCache() {
+    private fun invalidateKotlinPluginCache() {
         if (project.isDisposed) {
             return
         }

@@ -124,6 +124,7 @@ class MyPluginTest : BasePlatformTestCase() {
                     ids = listOf(MavenId("org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin")),
                     versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     enabled = true,
+                    ignoreExceptions = false,
                     repositories = listOf(
                         KotlinArtifactsRepository(
                             name = "[testDownloadJar]",
@@ -145,7 +146,7 @@ class MyPluginTest : BasePlatformTestCase() {
     }
 
     fun testXmlLoading() {
-        val state = DefaultStateLoader.loadState()
+        val state = KotlinPluginsDefaultStateLoader.loadState()
         val repository = KotlinArtifactsRepository(
             name = "kotlinx-rpc for IDE",
             value = "https://maven.pkg.jetbrains.space/public/p/krpc/for-ide",
@@ -170,6 +171,7 @@ class MyPluginTest : BasePlatformTestCase() {
                     ),
                     versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
                     repositories = listOf(repository),
+                    ignoreExceptions = false,
                     enabled = true,
                 ),
             ),
@@ -286,10 +288,14 @@ class MyPluginTest : BasePlatformTestCase() {
                 return mapOf(JarId("kotlinx-rpc", "come") to setOf(DetectorClass::class.qualifiedName!!))
             }
 
-            override fun matched(id: JarId, exception: Throwable, cutoutIndex: Int) {
+            override fun matched(id: JarId, exception: Throwable, cutoutIndex: Int, autoDisable: Boolean) {
                 if (!matched.complete(exception)) {
                     tooMany = true
                 }
+            }
+
+            override fun hasExceptions(pluginName: String, mavenId: String): Boolean {
+                return false
             }
         }
 
