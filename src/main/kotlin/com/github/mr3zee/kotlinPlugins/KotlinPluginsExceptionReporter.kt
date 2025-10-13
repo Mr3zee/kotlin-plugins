@@ -12,7 +12,6 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 
@@ -44,14 +43,10 @@ class KotlinPluginsExceptionReporterImpl(
 
     private val stackTraceMap = ConcurrentHashMap<JarId, Set<String>>()
 
-    private val processingQueue = Channel<KotlinPluginDiscoveryUpdater.Discovery>(Channel.UNLIMITED)
-
     override fun dispose() {
         connection.disconnect()
         job?.cancel()
         stackTraceMap.clear()
-        processingQueue.close()
-        processingQueue.cancel()
     }
 
     override fun start() {
@@ -77,12 +72,6 @@ class KotlinPluginsExceptionReporterImpl(
             initialized.complete(Unit)
 
             logger.debug("Finished initial processing of all jars")
-
-            while (true) {
-                val discovery = processingQueue.receiveCatching().getOrNull() ?: break
-
-                processDiscovery(discovery)
-            }
         }
     }
 
@@ -161,8 +150,8 @@ class KotlinPluginsExceptionReporterImpl(
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
-        override fun discovered(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
-            processingQueue.trySend(discovery)
+        override fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
+            processDiscovery(discovery)
 
             caughtExceptions.compute(discovery.pluginName) { _, old ->
                 old.orEmpty().filterNot { it.mavenId == discovery.mavenId }

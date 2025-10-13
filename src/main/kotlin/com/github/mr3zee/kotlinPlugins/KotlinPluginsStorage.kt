@@ -84,7 +84,7 @@ interface KotlinPluginStatusUpdater {
 }
 
 interface KotlinPluginDiscoveryUpdater {
-    fun discovered(discovery: Discovery)
+    fun discoveredSync(discovery: Discovery)
     fun reset()
 
     class Discovery(
@@ -100,8 +100,8 @@ interface KotlinPluginDiscoveryUpdater {
     }
 }
 
-fun KotlinPluginDiscoveryUpdater.discovered(pluginName: String, mavenId: String, version: String, jar: Path) {
-    discovered(KotlinPluginDiscoveryUpdater.Discovery(pluginName, mavenId, version, jar))
+fun KotlinPluginDiscoveryUpdater.discoveredSync(pluginName: String, mavenId: String, version: String, jar: Path) {
+    discoveredSync(KotlinPluginDiscoveryUpdater.Discovery(pluginName, mavenId, version, jar))
 }
 
 @Service(Service.Level.PROJECT)
@@ -126,6 +126,9 @@ class KotlinPluginsStorage(
     private val actualizerLock = Mutex()
     private val actualizerJobs = ConcurrentHashMap<VersionedKotlinPluginDescriptor, Job>()
 
+    private val indexLock = Mutex()
+    private val indexJobs = ConcurrentHashMap<VersionedKotlinPluginDescriptor, Job>()
+
     private val logger by lazy { thisLogger() }
 
     private val pluginsCache =
@@ -148,14 +151,25 @@ class KotlinPluginsStorage(
                 }
             }
 
+            while (true) {
+                indexJobs.values.forEach { it.cancelAndJoin() }
+                if (indexLock.tryLock()) {
+                    break
+                }
+            }
+
             actualizerJobs.values.forEach { it.cancelAndJoin() }
             actualizerJobs.clear()
+            indexJobs.values.forEach { it.cancelAndJoin() }
+            indexJobs.clear()
 
             pluginsCache.clear()
+            discoveryPublisher.reset()
 
             and()
         } finally {
             actualizerLock.unlock()
+            indexLock.unlock()
         }
     }
 
@@ -175,9 +189,11 @@ class KotlinPluginsStorage(
 
             internalClearStateNoInvalidate {
                 cacheDir()?.let {
+                    val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+
                     @OptIn(ExperimentalPathApi::class)
                     runCatching {
-                        it.deleteRecursively()
+                        it.resolve(kotlinIdeVersion).deleteRecursively()
                     }
                 }
 
@@ -203,6 +219,9 @@ class KotlinPluginsStorage(
         scope.coroutineContext.job.invokeOnCompletion {
             pluginsCache.clear()
             actualizerJobs.clear()
+            indexJobs.clear()
+            discoveryPublisher.reset()
+            statusPublisher.reset()
             logger.debug("Storage closed")
         }
 
@@ -360,22 +379,27 @@ class KotlinPluginsStorage(
                 val requestedKey = ResolvedPluginKey(id, plugin.version)
 
                 fun updateMap(key: ResolvedPluginKey, updateDiscovery: Boolean) {
+                    var isNew = false
+
                     artifactsMap.compute(key) { _, old ->
                         val oldChecksum = (old as? ArtifactState.Cached)?.jar?.checksum
                         if (locatorResult is LocatorResult.Cached && locatorResult.jar.checksum != oldChecksum) {
-                            if (updateDiscovery) {
-                                discoveryPublisher.discovered(
-                                    pluginName = descriptor.name,
-                                    mavenId = id.id,
-                                    version = locatorResult.state.actualVersion,
-                                    jar = locatorResult.jar.path,
-                                )
-                            }
-
+                            isNew = true
                             anyJarChanged.compareAndSet(false, true)
                         }
 
                         locatorResult.state
+                    }
+
+                    if (updateDiscovery && isNew) {
+                        locatorResult as LocatorResult.Cached
+
+                        discoveryPublisher.discoveredSync(
+                            pluginName = descriptor.name,
+                            mavenId = id.id,
+                            version = locatorResult.state.actualVersion,
+                            jar = locatorResult.jar.path,
+                        )
                     }
                 }
 
@@ -432,7 +456,7 @@ class KotlinPluginsStorage(
 
         logger.debug(
             "Cached versions for ${requested.version} (${requested.descriptor.name}): " +
-                    "${paths.map { "${it.first} -> ${it.second?.actualVersion}" }}"
+                    "${paths.filter { it.second != null }.map { "${it.first} -> ${it.second?.actualVersion}" }}"
         )
 
         val allExist = paths.all { it.second?.jar?.path?.exists() == true }
@@ -457,13 +481,6 @@ class KotlinPluginsStorage(
             status = state.toStatus(),
         )
 
-        discoveryPublisher.discovered(
-            pluginName = requested.descriptor.name,
-            mavenId = requested.artifact.id,
-            version = requested.version,
-            jar = state.jar.path,
-        )
-
         return state.jar.path
     }
 
@@ -479,7 +496,16 @@ class KotlinPluginsStorage(
         kotlinIdeVersion: String,
         knownByIde: Map<String, ArtifactState.Cached?>,
     ) {
-        scope.launch(CoroutineName("update-cache-from-disk-${requested.descriptor.name}-${requested.version}")) {
+        if (indexJobs[requested]?.isActive == true) {
+            return
+        }
+
+        val nextJob = scope.launch(
+            context = Dispatchers.IO + CoroutineName(
+                "update-cache-from-disk-${requested.descriptor.name}-${requested.version}"
+            ),
+            start = CoroutineStart.LAZY
+        ) {
             logger.debug("Updating cache from disk for ${requested.descriptor.name} (${requested.version})")
 
             val paths = requested.descriptor.ids.map {
@@ -510,6 +536,24 @@ class KotlinPluginsStorage(
                 invalidateKotlinPluginCache()
             }
         }
+
+        scope.launch(CoroutineName("index-plugins-job-starter-${requested.descriptor.name}")) {
+            indexLock.withLock {
+                val running = indexJobs.computeIfAbsent(requested) { nextJob }
+                if (running != nextJob) {
+                    nextJob.cancel()
+                    return@withLock
+                }
+
+                nextJob.invokeOnCompletion {
+                    indexJobs.compute(requested) { _, it ->
+                        if (it === nextJob) null else it
+                    }
+                }
+
+                nextJob.start()
+            }
+        }
     }
 
     private fun findArtifactAndUpdateMap(
@@ -538,6 +582,13 @@ class KotlinPluginsStorage(
                     val jar = Jar(
                         path = found,
                         checksum = checksum,
+                    )
+
+                    discoveryPublisher.discoveredSync(
+                        pluginName = requested.descriptor.name,
+                        mavenId = requested.artifact.id,
+                        version = requested.version,
+                        jar = jar.path,
                     )
 
                     ArtifactState.Cached(
@@ -611,14 +662,14 @@ class KotlinPluginsStorage(
             return
         }
 
+        statusPublisher.reset()
+
         val provider = KotlinCompilerPluginsProvider.getInstance(project)
 
         if (provider is Disposable) {
             provider.dispose() // clear Kotlin plugin caches
         }
 
-        statusPublisher.reset()
-        discoveryPublisher.reset()
         logger.debug("Invalidated KotlinCompilerPluginsProvider")
     }
 
