@@ -267,7 +267,7 @@ private class NodeData(
 
                 is ArtifactStatus.FailedToLoad -> {
                     addText(label, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-                    addText(status.shortMessage, SimpleTextAttributes.ERROR_ATTRIBUTES)
+                    addText(" ${status.shortMessage}", SimpleTextAttributes.ERROR_ATTRIBUTES)
                 }
 
                 // fallback to presentable text

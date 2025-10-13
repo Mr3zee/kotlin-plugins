@@ -76,8 +76,7 @@ class MyPluginTest : BasePlatformTestCase() {
     }
 
     fun testManifestDownload() = runBlocking {
-        val manifestResult = KotlinPluginJarLocator.locateManifestAndGetVersions(
-            "[testManifestDownload]",
+        val manifestResult = KotlinPluginJarLocator.locateManifestAndGetVersionsFromRemoteRepository(
             KotlinPluginJarLocator.ArtifactManifest.Locator.ByUrl(
                 "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin"
             ),
@@ -87,7 +86,7 @@ class MyPluginTest : BasePlatformTestCase() {
             fail("Failed to download manifest: ${manifestResult.state.message}")
         }
 
-        val extracted = (manifestResult as KotlinPluginJarLocator.ManifestResult.Found).versions.filter {
+        val extracted = (manifestResult as KotlinPluginJarLocator.ManifestResult.Success).versions.filter {
             it.endsWith("0.2.2-dev-1")
         }
 
