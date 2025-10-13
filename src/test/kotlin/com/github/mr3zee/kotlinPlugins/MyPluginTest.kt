@@ -137,6 +137,7 @@ class MyPluginTest : BasePlatformTestCase() {
             ),
             kotlinIdeVersion = "1.9.24",
             dest = tempFile,
+            known = emptyMap(),
         )
 
         val jarFile = tempFile.toFile().listFiles()?.firstOrNull()

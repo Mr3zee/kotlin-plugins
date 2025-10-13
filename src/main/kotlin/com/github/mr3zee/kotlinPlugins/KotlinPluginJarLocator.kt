@@ -13,16 +13,23 @@ import kotlinx.io.readByteArray
 import org.jetbrains.kotlin.config.MavenComparableVersion
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
+import java.io.IOException
+import java.math.BigInteger
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.Path
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.appendBytes
+import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
+import kotlin.io.path.extension
+import kotlin.io.path.readBytes
 import kotlin.io.path.readText
+
 
 class BundleResult(
     val locatorResults: Map<MavenId, LocatorResult>,
@@ -39,7 +46,8 @@ sealed interface LocatorResult {
         val filter: MatchFilter,
         override val libVersion: String,
     ) : LocatorResult {
-        override val state: ArtifactState.Cached = ArtifactState.Cached(jar.path, filter.version, libVersion, filter.matching)
+        override val state: ArtifactState.Cached =
+            ArtifactState.Cached(jar, filter.version, libVersion, filter.matching)
     }
 
     class FailedToFetch(
@@ -55,7 +63,7 @@ sealed interface LocatorResult {
 
 class Jar(
     val path: Path,
-    val isNew: Boolean,
+    val checksum: String,
 )
 
 internal object KotlinPluginJarLocator {
@@ -95,6 +103,7 @@ internal object KotlinPluginJarLocator {
         versioned: VersionedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
         dest: Path,
+        known: Map<MavenId, Jar>,
     ): BundleResult {
         val logTag = "[${versioned.descriptor.name}:${logId.andIncrement}]"
 
@@ -107,6 +116,7 @@ internal object KotlinPluginJarLocator {
                     versioned = RequestedKotlinPluginDescriptor(versioned.descriptor, versioned.version, mavenId),
                     kotlinIdeVersion = kotlinIdeVersion,
                     dest = dest,
+                    known = known[mavenId],
                 )
             }
         )
@@ -117,6 +127,7 @@ internal object KotlinPluginJarLocator {
         versioned: RequestedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
         dest: Path,
+        known: Jar?,
     ): LocatorResult {
         val descriptor = versioned.descriptor
         val artifact = versioned.artifact
@@ -172,6 +183,7 @@ internal object KotlinPluginJarLocator {
                 logTag = logTag,
                 versions = manifestResult.versions,
                 manifest = manifest,
+                known = known,
             )
 
             if (locatorResult is LocatorResult.Cached && locatorResult.libVersion == versioned.version) {
@@ -256,6 +268,7 @@ internal object KotlinPluginJarLocator {
         logTag: String,
         versions: List<String>,
         manifest: ArtifactManifest,
+        known: Jar?,
     ): LocatorResult {
         logger.debug("$logTag Requested version: ${manifest.matchFilter.version}")
 
@@ -287,23 +300,46 @@ internal object KotlinPluginJarLocator {
         logger.debug("$logTag Version to locate: $artifactVersion")
 
         val filename = "${manifest.artifactId}-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
-        val forIdeFilename = "${manifest.artifactId}-$artifactVersion-$FOR_IDE_CLASSIFIER.jar"
         val plainFilename = "${manifest.artifactId}-$artifactVersion.jar"
 
-        val forIdeVersion = locateArtifactByFullQualifier(
-            manifest = manifest,
-            filename = filename,
+        val checksumResult = getChecksum(
             logTag = logTag,
-            artifactName = forIdeFilename,
+            manifest = manifest,
+            artifactName = plainFilename,
             artifactVersion = artifactVersion,
-            libVersion = libVersion,
         )
 
-        if (forIdeVersion is LocatorResult.Cached) {
-            return forIdeVersion.moved()
+        val checksum = when (checksumResult) {
+            is ChecksumResult.Success -> checksumResult.checksum
+
+            is ChecksumResult.NotFound -> return LocatorResult.NotFound(
+                state = ArtifactState.NotFound("No checksum file found for $plainFilename"),
+                libVersion = libVersion,
+            )
+
+            is ChecksumResult.FailedToFetch -> return LocatorResult.FailedToFetch(
+                state = ArtifactState.FailedToFetch(
+                    "Failed to fetch checksum file for $plainFilename: ${checksumResult.message}"
+                ),
+                libVersion = libVersion,
+            )
         }
 
-        logger.debug("$logTag No for-ide version exists, trying the default version")
+        val cached = manifest.dest.resolve(plainFilename)
+
+        if (Files.exists(cached) && known?.path == cached) {
+            if (known.checksum == checksum) {
+                logger.debug("$logTag A file already exists, matching checksums: ${cached.absolutePathString()}")
+
+                return LocatorResult.Cached(
+                    jar = known,
+                    filter = manifest.matchFilter,
+                    libVersion = libVersion,
+                )
+            }
+
+            logger.debug("$logTag A file already exists, but checksums do not match: ${cached.absolutePathString()}")
+        }
 
         return locateArtifactByFullQualifier(
             manifest = manifest,
@@ -312,6 +348,7 @@ internal object KotlinPluginJarLocator {
             artifactName = plainFilename,
             artifactVersion = artifactVersion,
             libVersion = libVersion,
+            checksum = checksum,
         ).moved()
     }
 
@@ -320,11 +357,11 @@ internal object KotlinPluginJarLocator {
             return this
         }
 
-        return if (jar.isNew) {
+        return if (jar.path.extension == DOWNLOADING_EXTENSION) {
             val finalFilename = jar.path.removeDownloadingExtension()
             Files.move(jar.path, finalFilename, StandardCopyOption.ATOMIC_MOVE)
 
-            LocatorResult.Cached(Jar(finalFilename, isNew = true), filter, libVersion)
+            LocatorResult.Cached(Jar(finalFilename, jar.checksum), filter, libVersion)
         } else {
             this
         }
@@ -341,6 +378,7 @@ internal object KotlinPluginJarLocator {
         artifactName: String,
         artifactVersion: String,
         libVersion: String,
+        checksum: String,
     ): LocatorResult {
         if (!manifest.dest.exists()) {
             manifest.dest.toFile().mkdirs()
@@ -348,21 +386,17 @@ internal object KotlinPluginJarLocator {
 
         val file: Path = manifest.dest.resolve(filename)
 
-        val finalFilename = file.removeDownloadingExtension()
-        if (Files.exists(finalFilename)) {
-            logger.debug("$logTag A file already exists: ${finalFilename.absolutePathString()}")
-            return LocatorResult.Cached(
-                jar = Jar(
-                    path = finalFilename,
-                    isNew = false,
+        try {
+            @Suppress("BlockingMethodInNonBlockingContext")
+            Files.createFile(file)
+        } catch (e: IOException) {
+            return LocatorResult.FailedToFetch(
+                state = ArtifactState.FailedToFetch(
+                    "Failed to create file $filename: ${e::class}: ${e.message}"
                 ),
-                filter = manifest.matchFilter,
                 libVersion = libVersion,
             )
         }
-
-        @Suppress("BlockingMethodInNonBlockingContext")
-        Files.createFile(file)
 
         var result: LocatorResult? = null
 
@@ -374,6 +408,7 @@ internal object KotlinPluginJarLocator {
                 artifactName = artifactName,
                 artifactVersion = artifactVersion,
                 libVersion = libVersion,
+                checksum = checksum,
             ).also {
                 result = it
             }
@@ -391,9 +426,10 @@ internal object KotlinPluginJarLocator {
         artifactName: String,
         artifactVersion: String,
         libVersion: String,
+        checksum: String,
     ): LocatorResult {
         return when (manifest.locator) {
-            is ArtifactManifest.Locator.ByUrl -> locateNewArtifact(
+            is ArtifactManifest.Locator.ByUrl -> locateNewArtifactFromRemoteRepository(
                 file = file,
                 logTag = logTag,
                 artifactUrl = manifest.locator.url,
@@ -401,9 +437,10 @@ internal object KotlinPluginJarLocator {
                 artifactVersion = artifactVersion,
                 libVersion = libVersion,
                 filter = manifest.matchFilter,
+                checksum = checksum,
             )
 
-            is ArtifactManifest.Locator.ByPath -> locateNewArtifact(
+            is ArtifactManifest.Locator.ByPath -> locateNewArtifactLocally(
                 file = file,
                 logTag = logTag,
                 artifactPath = manifest.locator.path,
@@ -411,11 +448,12 @@ internal object KotlinPluginJarLocator {
                 artifactVersion = artifactVersion,
                 libVersion = libVersion,
                 filter = manifest.matchFilter,
+                checksum = checksum,
             )
         }
     }
 
-    private suspend fun locateNewArtifact(
+    private suspend fun locateNewArtifactFromRemoteRepository(
         file: Path,
         logTag: String,
         artifactUrl: String,
@@ -423,89 +461,35 @@ internal object KotlinPluginJarLocator {
         artifactVersion: String,
         libVersion: String,
         filter: MatchFilter,
+        checksum: String,
     ): LocatorResult {
-        val urlString = "$artifactUrl/$artifactVersion/$artifactName"
-        val result = client.prepareGet(urlString).execute { httpResponse ->
-            if (httpResponse.status == HttpStatusCode.NotFound) {
-                return@execute LocatorResult.NotFound(
-                    state = ArtifactState.NotFound("Artifact not found at $urlString"),
-                    libVersion = libVersion,
-                )
-            }
+        val url = "$artifactUrl/$artifactVersion/$artifactName"
+        val downloadResult = downloadFile(
+            destination = file,
+            logTag = logTag,
+            url = url,
+        )
 
-            if (!httpResponse.status.isSuccess()) {
-                return@execute LocatorResult.FailedToFetch(
-                    ArtifactState.FailedToFetch(
-                        "Non 200 status code (${httpResponse.status.value}) when downloading $artifactName " +
-                                "from ${urlString}: ${httpResponse.bodyAsText()}"
-                    ),
-                    libVersion = libVersion,
-                )
-            }
+        return when (downloadResult) {
+            is DownloadResult.Success -> LocatorResult.Cached(
+                jar = Jar(file, checksum),
+                filter = filter,
+                libVersion = libVersion,
+            )
 
-            val requestUrl = httpResponse.request.url.toString()
-            val contentLength = httpResponse.contentLength()?.toDouble() ?: 0.0
+            is DownloadResult.NotFound -> LocatorResult.NotFound(
+                state = ArtifactState.NotFound("File not found $url"),
+                libVersion = libVersion,
+            )
 
-            logger.debug("$logTag Request URL: $requestUrl, size: $contentLength")
-
-            if (contentLength == 0.0) {
-                return@execute LocatorResult.FailedToFetch(
-                    ArtifactState.FailedToFetch(
-                        "Empty response body when downloading $artifactName from $requestUrl"
-                    ),
-                    libVersion = libVersion,
-                )
-            }
-
-            try {
-                val channel: ByteReadChannel = httpResponse.body()
-                while (!channel.isClosedForRead) {
-                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                    while (!packet.exhausted()) {
-                        val bytes: ByteArray = packet.readByteArray()
-                        file.appendBytes(bytes)
-                        val size = Files.size(file)
-
-                        logger.trace("$logTag Received $size / $contentLength")
-                    }
-                }
-
-                LocatorResult.Cached(Jar(file, isNew = true), filter, libVersion)
-            } catch (e: Exception) {
-                if (e is CancellationException) {
-                    throw e
-                }
-
-                logger.error("$logTag Exception while downloading file $artifactName", e)
-                LocatorResult.FailedToFetch(
-                    ArtifactState.FailedToFetch(
-                        "Exception while downloading file $artifactName from $urlString: ${e::class}: ${e.message}"
-                    ),
-                    libVersion = libVersion,
-                )
-            }
+            is DownloadResult.FailedToFetch -> LocatorResult.FailedToFetch(
+                state = ArtifactState.FailedToFetch(downloadResult.message),
+                libVersion = libVersion,
+            )
         }
-
-        if (result !is LocatorResult.Cached) {
-            @Suppress("BlockingMethodInNonBlockingContext")
-            Files.delete(file)
-            val message = when (result) {
-                is LocatorResult.FailedToFetch -> result.state.message
-                is LocatorResult.NotFound -> result.state.message
-                else -> "Unknown error"
-            }
-
-            logger.debug("$logTag Failed to download file $artifactName: $message")
-
-            return result
-        }
-
-        logger.debug("$logTag File downloaded successfully")
-
-        return result
     }
 
-    private fun locateNewArtifact(
+    private fun locateNewArtifactLocally(
         file: Path,
         logTag: String,
         artifactPath: Path,
@@ -513,6 +497,7 @@ internal object KotlinPluginJarLocator {
         artifactVersion: String,
         libVersion: String,
         filter: MatchFilter,
+        checksum: String,
     ): LocatorResult {
         val jarPath = artifactPath.resolve(artifactVersion).resolve(artifactName)
 
@@ -524,9 +509,194 @@ internal object KotlinPluginJarLocator {
             )
         }
 
-        Files.copy(jarPath, file, StandardCopyOption.REPLACE_EXISTING)
+        try {
+            Files.copy(jarPath, file, StandardCopyOption.REPLACE_EXISTING)
+        } catch (e: IOException) {
+            return LocatorResult.FailedToFetch(
+                state = ArtifactState.FailedToFetch(
+                    "Failed to copy file $artifactName: ${e::class}: ${e.message}"
+                ),
+                libVersion = libVersion,
+            )
+        }
 
-        return LocatorResult.Cached(Jar(file, isNew = true), filter, libVersion)
+        return LocatorResult.Cached(Jar(file, checksum), filter, libVersion)
+    }
+
+    private suspend fun getChecksum(
+        logTag: String,
+        manifest: ArtifactManifest,
+        artifactName: String,
+        artifactVersion: String,
+    ): ChecksumResult {
+        return when (manifest.locator) {
+            is ArtifactManifest.Locator.ByUrl -> getRemoteChecksum(
+                logTag = logTag,
+                artifactUrl = manifest.locator.url,
+                artifactName = artifactName,
+                artifactVersion = artifactVersion,
+            )
+
+            is ArtifactManifest.Locator.ByPath -> getLocalChecksum(
+                logTag = logTag,
+                artifactPath = manifest.locator.path,
+                artifactName = artifactName,
+                artifactVersion = artifactVersion,
+            )
+        }
+    }
+
+    sealed interface ChecksumResult {
+        class Success(val checksum: String) : ChecksumResult
+        object NotFound : ChecksumResult
+        class FailedToFetch(val message: String) : ChecksumResult
+    }
+
+    private suspend fun getRemoteChecksum(
+        logTag: String,
+        artifactUrl: String,
+        artifactName: String,
+        artifactVersion: String,
+    ): ChecksumResult {
+        val url = "$artifactUrl/$artifactVersion/$artifactName.md5"
+        val temp = Files.createTempFile("checksum", ".md5")
+        try {
+            val downloadResult = downloadFile(
+                destination = temp,
+                logTag = logTag,
+                url = url,
+            )
+
+            val checksum = try {
+                temp.readBytes().asChecksum()
+            } catch (e: IOException) {
+                return ChecksumResult.FailedToFetch("Failed to read checksum file: ${e.message}")
+            }
+
+            return when (downloadResult) {
+                is DownloadResult.Success -> ChecksumResult.Success(checksum)
+                is DownloadResult.NotFound -> ChecksumResult.NotFound
+                is DownloadResult.FailedToFetch -> ChecksumResult.FailedToFetch(downloadResult.message)
+            }
+        } finally {
+            temp.deleteIfExists()
+        }
+    }
+
+    private fun getLocalChecksum(
+        logTag: String,
+        artifactPath: Path,
+        artifactName: String,
+        artifactVersion: String,
+    ): ChecksumResult {
+        val md5Path = artifactPath.resolve(artifactVersion).resolve("${artifactName}.md5")
+
+        if (!md5Path.exists()) {
+            val originalFile = artifactPath.resolve(artifactVersion).resolve(artifactName)
+
+            logger.debug("$logTag No checksum file found for $originalFile, calculating for a .jar file")
+
+            if (!originalFile.exists()) {
+                return ChecksumResult.NotFound
+            }
+
+            try {
+                val checksum = md5(originalFile)
+                    .asChecksum()
+
+                return ChecksumResult.Success(checksum)
+            } catch (e: Exception) {
+                return ChecksumResult.FailedToFetch(
+                    "Failed to calculate the checksum for the $originalFile: ${e::class}: ${e.message}"
+                )
+            }
+        }
+
+        logger.debug("$logTag Found checksum file: ${md5Path.absolutePathString()}")
+
+        return try {
+            ChecksumResult.Success(md5Path.readBytes().asChecksum())
+        } catch (e: Exception) {
+            ChecksumResult.FailedToFetch(
+                "Failed to read md5 file $md5Path: ${e::class}: ${e.message}"
+            )
+        }
+    }
+
+    private sealed interface DownloadResult {
+        object NotFound : DownloadResult
+        object Success : DownloadResult
+        class FailedToFetch(val message: String) : DownloadResult
+    }
+
+    private suspend fun downloadFile(
+        destination: Path,
+        logTag: String,
+        url: String,
+    ): DownloadResult {
+        val result = client.prepareGet(url).execute { httpResponse ->
+            if (httpResponse.status == HttpStatusCode.NotFound) {
+                return@execute DownloadResult.NotFound
+            }
+
+            if (!httpResponse.status.isSuccess()) {
+                return@execute DownloadResult.FailedToFetch(
+                    "Non 200 status code (${httpResponse.status.value}) when downloading " +
+                            "from ${url}: ${httpResponse.bodyAsText()}"
+                )
+            }
+
+            val requestUrl = httpResponse.request.url.toString()
+            val contentLength = httpResponse.contentLength()?.toDouble() ?: 0.0
+
+            logger.debug("$logTag Request URL: $requestUrl, size: $contentLength")
+
+            if (contentLength == 0.0) {
+                return@execute DownloadResult.FailedToFetch(
+                    "Empty response body when downloading from $requestUrl"
+                )
+            }
+
+            try {
+                val channel: ByteReadChannel = httpResponse.body()
+                while (!channel.isClosedForRead) {
+                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
+                    while (!packet.exhausted()) {
+                        val bytes: ByteArray = packet.readByteArray()
+                        destination.appendBytes(bytes)
+                    }
+                }
+
+                DownloadResult.Success
+            } catch (e: Exception) {
+                if (e is CancellationException) {
+                    throw e
+                }
+
+                DownloadResult.FailedToFetch(
+                    "Exception while downloading file from $url: ${e::class}: ${e.message}"
+                )
+            }
+        }
+
+        if (result !is DownloadResult.Success) {
+            @Suppress("BlockingMethodInNonBlockingContext")
+            runCatching { Files.delete(destination) }
+
+            val message = when (result) {
+                is DownloadResult.FailedToFetch -> result.message
+                is DownloadResult.NotFound -> "not found"
+                else -> "Unknown error"
+            }
+
+            logger.debug("$logTag Failed to download file from $url: $message")
+
+            return result
+        }
+
+        logger.debug("$logTag File downloaded successfully")
+
+        return result
     }
 
     sealed interface ManifestResult {
@@ -535,6 +705,7 @@ internal object KotlinPluginJarLocator {
                 return versions.toString()
             }
         }
+
         class FailedToFetch(val state: ArtifactState.FailedToFetch) : ManifestResult
     }
 
@@ -598,11 +769,25 @@ internal object KotlinPluginJarLocator {
             )
         }
 
-        return ManifestResult.Found(parseManifestXmlToVersions(manifestPath.readText()))
+        try {
+            return ManifestResult.Found(parseManifestXmlToVersions(manifestPath.readText()))
+        } catch (e: Exception) {
+            logger.error("$logTag Failed to parse manifest XML: ${manifestPath.absolutePathString()}", e)
+            return ManifestResult.FailedToFetch(
+                ArtifactState.FailedToFetch(
+                    "Failed to parse manifest XML: ${manifestPath.absolutePathString()}"
+                )
+            )
+        }
     }
 }
 
-private const val FOR_IDE_CLASSIFIER = "for-ide"
+internal fun md5(originalFile: Path): ByteArray =
+    MessageDigest.getInstance("MD5")
+        .digest(originalFile.readBytes())
+
+internal fun ByteArray.asChecksum(): String = BigInteger(1, this).toString(16)
+
 private const val DOWNLOADING_EXTENSION = "downloading"
 
 data class MatchFilter(
