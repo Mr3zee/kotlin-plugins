@@ -67,7 +67,7 @@ class Jar(
     val checksum: String,
 )
 
-internal object KotlinPluginJarLocator {
+internal object KotlinPluginsJarLocator {
     private val logger by lazy { thisLogger() }
 
     private val client by lazy {

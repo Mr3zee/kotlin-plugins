@@ -329,7 +329,7 @@ class KotlinPluginsStorage(
 
             val bundleResult = runCatching {
                 withContext(Dispatchers.IO) {
-                    KotlinPluginJarLocator.locateArtifacts(
+                    KotlinPluginsJarLocator.locateArtifacts(
                         versioned = plugin,
                         kotlinIdeVersion = kotlinIdeVersion,
                         dest = destination,

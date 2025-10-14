@@ -71,17 +71,17 @@ class MyPluginTest : BasePlatformTestCase() {
     }
 
     fun testManifestDownload() = runBlocking {
-        val manifestResult = KotlinPluginJarLocator.locateManifestAndGetVersionsFromRemoteRepository(
-            KotlinPluginJarLocator.ArtifactManifest.Locator.ByUrl(
+        val manifestResult = KotlinPluginsJarLocator.locateManifestAndGetVersionsFromRemoteRepository(
+            KotlinPluginsJarLocator.ArtifactManifest.Locator.ByUrl(
                 "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin"
             ),
         )
 
-        if (manifestResult is KotlinPluginJarLocator.ManifestResult.FailedToFetch) {
+        if (manifestResult is KotlinPluginsJarLocator.ManifestResult.FailedToFetch) {
             fail("Failed to download manifest: ${manifestResult.state.message}")
         }
 
-        val extracted = (manifestResult as KotlinPluginJarLocator.ManifestResult.Success).versions.filter {
+        val extracted = (manifestResult as KotlinPluginsJarLocator.ManifestResult.Success).versions.filter {
             it.endsWith("0.2.2-dev-1")
         }
 
@@ -111,7 +111,7 @@ class MyPluginTest : BasePlatformTestCase() {
 
     fun testDownloadJar() = runBlocking {
         val tempFile = Files.createTempDirectory("testDownloadJar")
-        val result = KotlinPluginJarLocator.locateArtifacts(
+        val result = KotlinPluginsJarLocator.locateArtifacts(
             versioned = VersionedKotlinPluginDescriptor(
                 descriptor = KotlinPluginDescriptor(
                     name = "[testDownloadJar]",

@@ -18,6 +18,9 @@
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity
+                implementation="com.github.mr3zee.kotlinPlugins.ExternalSystemReloadBridgeActivity"/>
+
         <projectConfigurable
                 id="com.github.mr3zee.kotlinPlugins.settings"
                 parentId="tools"
