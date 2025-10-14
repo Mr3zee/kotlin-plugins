@@ -42,6 +42,10 @@
                 implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsEditorNotificationProvider"
         />
 
+        <notificationGroup id="Kotlin External FIR Support"
+                           displayType="BALLOON"
+                           key="notification.kotlin.external.fir.support"/>
+
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core"
                            displayName="kotlinx-rpc"/>
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend"

@@ -28,6 +28,7 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.ScrollPaneFactory
@@ -215,8 +216,16 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     companion object {
+        const val ID = "Kotlin Plugins Diagnostics"
         const val DISPLAY_NAME = "Kotlin Plugins Diagnostics"
         const val PROPORTION_KEY = "KotlinPlugins.Proportion"
+
+        fun show(project: Project) {
+            ToolWindowManager
+                .getInstance(project)
+                .getToolWindow(ID)
+                ?.show()
+        }
     }
 }
 

@@ -4,7 +4,6 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.EditorNotificationPanel
 import com.intellij.ui.EditorNotificationProvider
 import com.intellij.ui.EditorNotifications
@@ -72,9 +71,7 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
             panel.createActionLabel("Open diagnostics") {
                 // todo update state to show error panel
 
-                ToolWindowManager.getInstance(project)
-                    .getToolWindow("Kotlin Plugins Diagnostics")
-                    ?.show()
+                KotlinPluginsToolWindowFactory.show(project)
 
                 cleanPanel()
             }

@@ -135,6 +135,8 @@ class KotlinPluginsExceptionReporterImpl(
 
         if (autoDisable) {
             settings.disablePlugins(plugin.name)
+
+            KotlinPluginsNotificationBallon.notify(project, disabledPlugin = plugin.name)
         } else {
             // trigger editor notification across all Kotlin files
             project.service<KotlinPluginsNotifications>().activate(plugin.name)
