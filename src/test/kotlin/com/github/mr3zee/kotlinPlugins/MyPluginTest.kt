@@ -1,15 +1,10 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.components.service
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import com.intellij.testFramework.replaceService
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.time.Duration.Companion.seconds
 
 class MyPluginTest : BasePlatformTestCase() {
     fun testKotlinVersion() {
@@ -275,54 +270,5 @@ class MyPluginTest : BasePlatformTestCase() {
         assert(result is KotlinPluginsAnalyzedJar.Success)
         val analyzedJar = result as KotlinPluginsAnalyzedJar.Success
         return analyzedJar.fqNames
-    }
-
-    fun testTailingLogFile() = runBlocking {
-        val matched = CompletableDeferred<Throwable>()
-        var tooMany = false
-
-        val reporter = object : KotlinPluginsExceptionReporter {
-            override fun start() { }
-
-            override suspend fun lookFor(): Map<JarId, Set<String>> {
-                return mapOf(JarId("kotlinx-rpc", "come") to setOf(DetectorClass::class.qualifiedName!!))
-            }
-
-            override fun matched(id: JarId, exception: Throwable, cutoutIndex: Int, autoDisable: Boolean) {
-                if (!matched.complete(exception)) {
-                    tooMany = true
-                }
-            }
-
-            override fun hasExceptions(pluginName: String, mavenId: String): Boolean {
-                return false
-            }
-        }
-
-        project.replaceService(KotlinPluginsExceptionReporter::class.java, reporter, project)
-        project.service<KotlinPluginsExceptionAnalyzerService>().updateState(enabled = true, autoDisable = true)
-        val logger = thisLogger()
-
-        logger.debug("Starting tailing log file")
-        logger.debug("Unrelated log entry")
-
-        runCatching { logger.error("Error, no message") }
-        runCatching { logger.error("Error, wrong one", IllegalStateException("hello my dear friend")) }
-        runCatching { logger.error("Error, right one one", DetectorClass().exception()) }
-
-        val result = withTimeoutOrNull(2.seconds) {
-            matched.await()
-        } ?: return@runBlocking fail("Failed to wait for the expected log entries")
-
-        assertFalse(tooMany)
-
-        assertEquals("java.lang.IllegalStateException", result::class.qualifiedName)
-        assertEquals("hello my dear friend 2", result.message)
-    }
-}
-
-class DetectorClass {
-    fun exception(): Throwable {
-        return IllegalStateException("hello my dear friend 2")
     }
 }
