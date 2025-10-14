@@ -89,10 +89,22 @@
 
     <actions>
         <action
-                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCacheAction"
-                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCacheAction"
-                text="Clear 'Kotlin FIR External Support' Cache"
-                description="Allows to clear the caches Kotlin plugins, so that the plugin can download the latest artifacts">
+                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCachesAction"
+                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCachesAction"
+                text="Kotlin FIR External Support: Clear Caches"
+                description="Allows to clear the caches for Kotlin compiler plugins for this IDE">
+        </action>
+        <action
+                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsRefreshAction"
+                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsRefreshAction"
+                text="Kotlin FIR External Support: Refresh Plugins"
+                description="Allows to refresh the Kotlin compiler plugins state without clearing caches">
+        </action>
+        <action
+                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsUpdateAction"
+                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsUpdateAction"
+                text="Kotlin FIR External Support: Update Plugins"
+                description="Allows to update the Kotlin compiler plugins data with the newest versions">
         </action>
     </actions>
 </idea-plugin>

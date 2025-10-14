@@ -23,7 +23,6 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindow
@@ -35,7 +34,6 @@ import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.TreeUIHelper
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
@@ -137,23 +135,15 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         group.addSeparator()
 
-        group.add(object : AnAction("Update", "Update plugin data", AllIcons.Vcs.Fetch) {
-            override fun getActionUpdateThread(): ActionUpdateThread {
-                return ActionUpdateThread.BGT
-            }
-
-            override fun actionPerformed(e: AnActionEvent) {
-                e.project?.service<KotlinPluginsStorage>()?.runActualization()
+        group.add(object : KotlinPluginsUpdateAction() {
+            init {
+                templatePresentation.text = "Update"
             }
         })
 
-        group.add(object : AnAction("Refresh", "Refresh IDE indices", AllIcons.General.Refresh) {
-            override fun getActionUpdateThread(): ActionUpdateThread {
-                return ActionUpdateThread.BGT
-            }
-
-            override fun actionPerformed(e: AnActionEvent) {
-                e.project?.service<KotlinPluginsStorage>()?.clearState()
+        group.add(object : KotlinPluginsRefreshAction() {
+            init {
+                templatePresentation.text = "Refresh"
             }
         })
 
@@ -193,17 +183,9 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         group.addSeparator()
 
-        group.add(object : AnAction("Clear Caches", "Clear caches (not implemented)", AllIcons.Actions.ClearCash) {
-            override fun actionPerformed(e: AnActionEvent) {
-                val clear = !tree.state.showClearCachesDialog || run {
-                    val (clear, dontShowAgain) = ClearCachesDialog.show()
-                    tree.state.showClearCachesDialog = !dontShowAgain
-                    clear
-                }
-
-                if (clear) {
-                    e.project?.service<KotlinPluginsStorage>()?.clearCaches()
-                }
+        group.add(object : KotlinPluginsClearCachesAction() {
+            init {
+                templatePresentation.text = "Clear Caches"
             }
         })
 
@@ -651,38 +633,6 @@ fun nodeKey(pluginName: String, mavenId: String? = null, version: String? = null
 
         else -> {
             pluginName
-        }
-    }
-}
-
-private class ClearCachesDialog : DialogWrapper(true) {
-    private var dontAskAgain: Boolean = false
-
-    init {
-        init()
-        title = "Clear Caches"
-    }
-
-    override fun isResizable(): Boolean {
-        return false
-    }
-
-    override fun createCenterPanel(): JComponent = panel {
-        row {
-            label("Are you sure you want to clear plugin caches?")
-        }
-
-        row {
-            checkBox("Don't ask again").applyToComponent {
-                addItemListener { dontAskAgain = isSelected }
-            }
-        }
-    }
-
-    companion object {
-        fun show(): Pair<Boolean, Boolean> {
-            val dialog = ClearCachesDialog()
-            return dialog.showAndGet() to dialog.dontAskAgain
         }
     }
 }
