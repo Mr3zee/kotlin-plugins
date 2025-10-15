@@ -136,6 +136,7 @@ class KotlinPluginsExceptionAnalyzerService(
             val handler = handler.getAndSet(null)
             rootLogger().removeHandler(handler)
             handler?.close()
+            project.service<KotlinPluginsExceptionReporter>().stop()
         }
     }
 

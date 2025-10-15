@@ -357,11 +357,8 @@ class KotlinPluginsStorage(
             failedToLocate = !bundle.allFound()
 
             bundle.locatorResults.entries.forEach { (id, locatorResult) ->
-                val reporter = project.service<KotlinPluginsExceptionReporter>()
-
                 val resolvedKey = ResolvedPluginKey(id, locatorResult.libVersion)
                 val requestedKey = ResolvedPluginKey(id, plugin.version)
-
 
                 fun updateMap(key: ResolvedPluginKey): Boolean {
                     var isNew = false
@@ -395,6 +392,8 @@ class KotlinPluginsStorage(
                         jar = locatorResult.jar.path,
                     )
                 }
+
+                val reporter = project.service<KotlinPluginsExceptionReporter>()
 
                 val status = if (
                     !resolvedIsNew &&
