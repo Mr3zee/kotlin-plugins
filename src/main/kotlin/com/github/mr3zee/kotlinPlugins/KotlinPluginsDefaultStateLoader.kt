@@ -37,12 +37,24 @@ object KotlinPluginsDefaultStateLoader {
                 "repository/@id missing"
             }
 
+            if (id.isBlank()) {
+                error("repository/@id must not be blank for repository $id")
+            }
+
             val name = requireNotNull(repoEl.getAttributeValue("name")) {
                 "repository/@name missing"
             }
 
+            if (name.isBlank()) {
+                error("repository/@name must not be blank for repository $id")
+            }
+
             val value = requireNotNull(repoEl.getAttributeValue("value")) {
                 "repository/@value missing"
+            }
+
+            if (value.isBlank()) {
+                error("repository/@value must not be blank for repository $name")
             }
 
             val typeStr = requireNotNull(repoEl.getAttributeValue("type")) {
@@ -77,6 +89,14 @@ object KotlinPluginsDefaultStateLoader {
                 "plugin/@name missing"
             }
 
+            if (name.isBlank()) {
+                error("plugin/@name must not be blank for plugin $name")
+            }
+
+            if (!pluginNameRegex.matches(name)) {
+                error("plugin/@name must comply with ${pluginNameRegex.pattern} for plugin $name")
+            }
+
             val versionMatchingString = requireNotNull(pluginEl.getAttributeValue("versionMatching")) {
                 "plugin/@versionMatching missing"
             }
@@ -100,7 +120,7 @@ object KotlinPluginsDefaultStateLoader {
                 if (mavenRegex.matches(coordinates)) {
                     MavenId(coordinates)
                 } else {
-                    null
+                    error("Invalid artifact coordinates: $coordinates for plugin $name")
                 }
             }
 

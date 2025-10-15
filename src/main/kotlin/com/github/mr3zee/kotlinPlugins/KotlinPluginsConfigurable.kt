@@ -757,6 +757,10 @@ private class PluginsDialog(
             return ValidationInfo("Name must be unique", nameField)
         }
 
+        if (!pluginNameRegex.matches(name)) {
+            return ValidationInfo("Name must comply with ${pluginNameRegex.pattern}")
+        }
+
         if (mutableIds.isEmpty()) {
             return ValidationInfo("At least one Maven coordinate must be specified")
         }
@@ -806,3 +810,4 @@ private class PluginsDialog(
 }
 
 val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()
+val pluginNameRegex = "[a-zA-Z0-9_-]+".toRegex()
