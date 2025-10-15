@@ -63,15 +63,16 @@ class KotlinPluginsSettings(
         return safeState().plugins.find { it.name == name }
     }
 
-    fun disablePlugins(vararg pluginNames: String) {
-        disablePlugins(pluginNames.toSet())
+    fun disablePlugins(pluginName: String) {
+        disablePlugins(setOf(pluginName))
     }
 
-    fun disablePlugins(pluginNames: Set<String>) {
+    fun disablePlugins(pluginNames: Iterable<String>) {
+        val set = pluginNames.toSet()
         updateWithDetectChanges {
             it.copy(
                 plugins = it.plugins.map { p ->
-                    if (p.name in pluginNames) p.copy(enabled = false) else p
+                    if (p.name in set) p.copy(enabled = false) else p
                 }
             )
         }

@@ -30,7 +30,7 @@ import kotlin.io.path.exists
 import kotlin.io.path.extension
 import kotlin.io.path.readBytes
 import kotlin.io.path.readText
-
+import kotlin.io.path.writeText
 
 class BundleResult(
     val locatorResults: Map<MavenId, LocatorResult>,
@@ -46,6 +46,7 @@ sealed interface LocatorResult {
         val jar: Jar,
         val filter: MatchFilter,
         override val libVersion: String,
+        val original: Path? = null,
     ) : LocatorResult {
         override val state: ArtifactState.Cached =
             ArtifactState.Cached(jar, filter.version, libVersion, filter.matching)
@@ -114,7 +115,7 @@ internal object KotlinPluginsJarLocator {
             locatorResults = versioned.descriptor.ids.associateWith { mavenId ->
                 locateArtifact(
                     logTag = logTag,
-                    versioned = RequestedKotlinPluginDescriptor(versioned.descriptor, versioned.version, mavenId),
+                    versioned = RequestedKotlinPluginDescriptor(versioned.descriptor, versioned.version, mavenId,),
                     kotlinIdeVersion = kotlinIdeVersion,
                     dest = dest,
                     known = known[mavenId],
@@ -131,7 +132,7 @@ internal object KotlinPluginsJarLocator {
         )
     }
 
-    suspend fun locateArtifact(
+    private suspend fun locateArtifact(
         logTag: String,
         versioned: RequestedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
@@ -150,7 +151,7 @@ internal object KotlinPluginsJarLocator {
         val notFound = mutableListOf<LocatorResult.NotFound>()
         val failedToFetch = mutableListOf<LocatorResult.FailedToFetch>()
 
-        descriptor.repositories.forEach {
+        descriptor.repositories.sortedByPriority().forEach {
             val locator = when (it.type) {
                 KotlinArtifactsRepository.Type.URL -> {
                     val groupUrl = artifact.groupId.replace(".", "/")
@@ -391,7 +392,7 @@ internal object KotlinPluginsJarLocator {
             val finalFilename = jar.path.removeDownloadingExtension()
             Files.move(jar.path, finalFilename, StandardCopyOption.ATOMIC_MOVE)
 
-            LocatorResult.Cached(Jar(finalFilename, jar.checksum), filter, libVersion)
+            LocatorResult.Cached(Jar(finalFilename, jar.checksum), filter, libVersion, original)
         } else {
             this
         }
@@ -492,6 +493,14 @@ internal object KotlinPluginsJarLocator {
         checksum: String,
     ): LocatorResult {
         val url = "$artifactUrl/$artifactVersion/$artifactName"
+
+        try {
+            val link = file.removeDownloadingExtension().jarLinkName()
+            link.deleteIfExists()
+        } catch (e: Exception) {
+            logger.debug("Failed to delete old link for $artifactName: ${e::class}: ${e.message}")
+        }
+
         val downloadResult = downloadFile(
             destination = file,
             logTag = logTag,
@@ -546,7 +555,25 @@ internal object KotlinPluginsJarLocator {
             )
         }
 
-        return LocatorResult.Cached(Jar(file, checksum), filter, libVersion)
+        val link = file.removeDownloadingExtension().jarLinkName()
+
+        try {
+            link.deleteIfExists()
+
+            Files.createSymbolicLink(link, jarPath)
+        } catch (e: Exception) {
+            logger.debug("Failed to create symbolic link for $artifactName: ${e::class}: ${e.message}")
+
+            try {
+                link.deleteIfExists()
+                link.createFile()
+                link.writeText(jarPath.absolutePathString())
+            } catch (e: Exception) {
+                logger.debug("Failed to create fallback link for $artifactName: ${e::class}: ${e.message}")
+            }
+        }
+
+        return LocatorResult.Cached(Jar(file, checksum), filter, libVersion, jarPath)
     }
 
     private suspend fun getChecksum(
@@ -845,6 +872,15 @@ internal fun getMatching(
     }.atLeast(filter.version)
 }
 
+private fun List<KotlinArtifactsRepository>.sortedByPriority(): List<KotlinArtifactsRepository> {
+    return sortedByDescending {
+        when (it.type) {
+            KotlinArtifactsRepository.Type.PATH -> 1
+            KotlinArtifactsRepository.Type.URL -> 0
+        }
+    }
+}
+
 private fun MavenComparableVersion?.atLeast(version: String): String? {
     if (this == null) {
         return null
@@ -866,4 +902,29 @@ internal fun parseManifestXmlToVersions(manifest: String): List<String> {
     } catch (_: IndexOutOfBoundsException) {
         emptyList()
     }
+}
+
+private fun Path.jarLinkName(): Path {
+    return resolveSibling("$fileName.link")
+}
+
+internal fun Path.resolveOriginalJarFile(): Path? {
+    val link = jarLinkName()
+    return runCatching {
+        if (link.exists()) {
+            val maybeOriginal = if (Files.isSymbolicLink(link)) {
+                link.toRealPath()
+            } else {
+                Path(link.readText())
+            }
+
+            if (maybeOriginal.exists() && maybeOriginal.fileName == fileName) {
+                maybeOriginal
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+    }.getOrNull()
 }

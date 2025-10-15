@@ -16,15 +16,22 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
+import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardWatchEventKinds
+import java.nio.file.WatchEvent
+import java.nio.file.WatchKey
+import java.nio.file.Watchable
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
+import kotlin.io.path.isDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.minutes
@@ -104,6 +111,11 @@ fun KotlinPluginDiscoveryUpdater.discoveredSync(pluginName: String, mavenId: Str
     discoveredSync(KotlinPluginDiscoveryUpdater.Discovery(pluginName, mavenId, version, jar))
 }
 
+internal data class VersionedPluginKey(
+    val pluginName: String,
+    val version: String,
+)
+
 @Service(Service.Level.PROJECT)
 class KotlinPluginsStorage(
     private val project: Project,
@@ -112,6 +124,19 @@ class KotlinPluginsStorage(
     private val resolvedCacheDir = AtomicBoolean(false)
     private var _cacheDir: Path? = null
     private val scope = parentScope + SupervisorJob(parentScope.coroutineContext.job)
+
+    private val watchService = FileSystems.getDefault().newWatchService()
+
+    private val pluginWatchKeys = ConcurrentHashMap<VersionedPluginKey, WatchKey>()
+    private val pluginWatchKeysReverse = ConcurrentHashMap<WatchKey, VersionedPluginKey>()
+
+    private class WatchKeyWithChecksum(
+        val key: WatchKey,
+        val checksum: String,
+    )
+
+    private val originalWatchKeys = ConcurrentHashMap<JarId, WatchKeyWithChecksum>()
+    private val originalWatchKeysReverse = ConcurrentHashMap<WatchKey, JarId>()
 
     @Suppress("UnstableApiUsage")
     suspend fun cacheDir(): Path? {
@@ -142,6 +167,10 @@ class KotlinPluginsStorage(
         project.messageBus.syncPublisher(KotlinPluginDiscoveryUpdater.TOPIC)
     }
 
+    private val fileWatcherThread by lazy {
+        Executors.newSingleThreadExecutor()
+    }
+
     private suspend inline fun internalClearStateNoInvalidate(and: () -> Unit = {}) {
         try {
             while (true) {
@@ -164,6 +193,14 @@ class KotlinPluginsStorage(
             indexJobs.clear()
 
             pluginsCache.clear()
+
+            pluginWatchKeys.values.forEach { it.cancel() }
+            pluginWatchKeys.clear()
+            pluginWatchKeysReverse.clear()
+            originalWatchKeys.values.forEach { it.key.cancel() }
+            originalWatchKeys.clear()
+            originalWatchKeysReverse.clear()
+
             discoveryPublisher.reset()
 
             and()
@@ -216,16 +253,139 @@ class KotlinPluginsStorage(
             }
         }
 
+        val fileWatcherDispatcher = fileWatcherThread.asCoroutineDispatcher()
+
+        scope.launch(fileWatcherDispatcher + CoroutineName("file-watcher")) {
+            try {
+                while (true) {
+                    try {
+                        fileWatcherLoop()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.error("File watcher loop failed", e)
+                        throw e
+                    }
+                }
+            } catch (_: Exception) {
+                // ignore
+            }
+        }
+
         scope.coroutineContext.job.invokeOnCompletion {
             pluginsCache.clear()
             actualizerJobs.clear()
             indexJobs.clear()
             discoveryPublisher.reset()
             statusPublisher.reset()
+            pluginWatchKeys.clear()
+            pluginWatchKeysReverse.clear()
+            originalWatchKeys.clear()
+            originalWatchKeysReverse.clear()
+            runCatching { watchService.close() } // can throw IOException
+            fileWatcherThread.shutdown()
             logger.debug("Storage closed")
         }
 
         project.service<KotlinPluginsExceptionAnalyzerService>().start()
+    }
+
+    private suspend fun fileWatcherLoop() {
+        val key = watchService.take()
+
+        if (!key.isValid) {
+            return
+        }
+
+        val path = key.watchable() as? Path
+        if (path == null) {
+            key.cancel()
+            return
+        }
+
+        val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        val reversed = pluginWatchKeysReverse[key]
+        if (reversed == null) {
+            // original
+            val jarId = originalWatchKeysReverse[key]
+            if (jarId == null) {
+                key.cancel()
+                originalWatchKeysReverse.remove(key)
+                return
+            }
+
+            val plugin = project.service<KotlinPluginsSettings>()
+                .pluginByName(jarId.pluginName)
+
+            if (plugin == null) {
+                key.cancel()
+                originalWatchKeysReverse.remove(key)?.let {
+                    originalWatchKeys.remove(it)
+                }
+                return
+            }
+
+            val artifactId = jarId.mavenId.substringAfter(":")
+            val detected = key.pollEvents().find { event ->
+                val context = event.context() as? Path ?: return@find false
+
+                val name = context.name
+                !context.isDirectory() &&
+                        name.contains(artifactId) &&
+                        name.contains("$kotlinIdeVersion-${jarId.version}") &&
+                        name.endsWith(".jar")
+            }
+
+            if (detected != null) {
+                logger.debug("File watcher detected a change in the original path for $jarId: ${detected.context()}")
+                scope.actualize(VersionedKotlinPluginDescriptor(plugin, jarId.version))
+            }
+            key.reset()
+        } else {
+            val cacheDir = reversed.directory(kotlinIdeVersion)
+            if (cacheDir == null) {
+                key.cancel()
+                pluginWatchKeysReverse.remove(key)?.let {
+                    pluginWatchKeys.remove(it)
+                }
+                return
+            }
+
+            if (path == cacheDir) {
+                val plugin = project.service<KotlinPluginsSettings>()
+                    .pluginByName(reversed.pluginName)
+
+                if (plugin == null) {
+                    key.cancel()
+                    pluginWatchKeysReverse.remove(key)?.let {
+                        pluginWatchKeys.remove(it)
+                    }
+                    return
+                }
+
+                val detected = key.pollEvents().filter { event ->
+                    val context = event.context() as? Path ?: return@filter false
+
+                    val name = context.name
+                    !context.isDirectory() &&
+                            plugin.ids.any { name.startsWith(it.artifactId) } &&
+                            name.contains("$kotlinIdeVersion-${reversed.version}") &&
+                            (name.endsWith(".jar") || name.endsWith(".link"))
+                }
+
+                if (detected.isNotEmpty()) {
+                    logger.debug("File watcher detected changes in the cached path for $reversed: ${detected.joinToString { it.context().toString() }}")
+                    scope.actualize(VersionedKotlinPluginDescriptor(plugin, reversed.version))
+                }
+                key.reset()
+            } else {
+                logger.debug("Unexpected cached path and watch key path inequality: $path != $cacheDir")
+                key.cancel()
+                pluginWatchKeysReverse.remove(key)?.let {
+                    pluginWatchKeys.remove(it)
+                }
+            }
+        }
     }
 
     fun runActualization() {
@@ -307,12 +467,18 @@ class KotlinPluginsStorage(
 
         var failedToLocate = false
         val nextJob = launch(context = CoroutineName("jar-fetcher-${descriptor.name}"), start = CoroutineStart.LAZY) {
+            val pluginWatchKey = VersionedPluginKey(descriptor.name, plugin.version)
+
+            pluginWatchKeys.remove(pluginWatchKey)?.also {
+                it.cancel()
+                pluginWatchKeysReverse.remove(it)
+            }
+
             statusPublisher.updatePlugin(descriptor.name, ArtifactStatus.InProgress)
 
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
-            val destination = cacheDir()?.resolve(kotlinIdeVersion)
-                ?: return@launch
+            val destination = pluginWatchKey.directory(kotlinIdeVersion) ?: return@launch
 
             val artifactsMap = pluginsCache
                 .getOrPut(kotlinIdeVersion) { ConcurrentHashMap() }
@@ -382,6 +548,27 @@ class KotlinPluginsStorage(
                     updateMap(resolvedKey)
                 }
 
+                if (locatorResult is LocatorResult.Cached) {
+                    val original = locatorResult.original
+                    if (original != null) {
+                        val jarKey = JarId(plugin.descriptor.name, id.id, locatorResult.libVersion)
+
+                        val watchKeyWithChecksum = originalWatchKeys.compute(jarKey) { _, old ->
+                            if (old?.checksum != locatorResult.state.jar.checksum) {
+                                old?.key?.cancel()
+
+                                original.parent?.registerSafe(StandardWatchEventKinds.ENTRY_MODIFY)?.let {
+                                    WatchKeyWithChecksum(it, locatorResult.state.jar.checksum)
+                                }
+                            } else old
+                        }
+
+                        if (watchKeyWithChecksum != null) {
+                            originalWatchKeysReverse[watchKeyWithChecksum.key] = jarKey
+                        }
+                    }
+                }
+
                 if (resolvedIsNew) {
                     locatorResult as LocatorResult.Cached
 
@@ -414,6 +601,14 @@ class KotlinPluginsStorage(
             }
 
             statusPublisher.redraw()
+
+            val watchKey = destination.registerSafe(
+                StandardWatchEventKinds.ENTRY_MODIFY,
+                StandardWatchEventKinds.ENTRY_DELETE,
+            ) ?: return@launch
+
+            pluginWatchKeys[pluginWatchKey] = watchKey
+            pluginWatchKeysReverse[watchKey] = pluginWatchKey
         }
 
         scope.launch(CoroutineName("actualize-plugins-job-starter-${descriptor.name}")) {
@@ -510,6 +705,8 @@ class KotlinPluginsStorage(
         ) {
             logger.debug("Updating cache from disk for ${requested.descriptor.name} (${requested.version})")
 
+            val pluginWatchKey = VersionedPluginKey(requested.descriptor.name, requested.version)
+
             val paths = requested.descriptor.ids.map {
                 val artifact = RequestedKotlinPluginDescriptor(
                     descriptor = requested.descriptor,
@@ -517,7 +714,12 @@ class KotlinPluginsStorage(
                     artifact = it,
                 )
 
-                findArtifactAndUpdateMap(pluginMap, artifact, kotlinIdeVersion)
+                findArtifactAndUpdateMap(
+                    pluginMap = pluginMap,
+                    requested = artifact,
+                    kotlinIdeVersion = kotlinIdeVersion,
+                    pluginWatchKey = pluginWatchKey,
+                )
             }
 
             logger.trace(
@@ -530,6 +732,17 @@ class KotlinPluginsStorage(
                 scope.actualize(requested)
 
                 return@launch
+            }
+
+            val new = pluginWatchKeys.compute(pluginWatchKey) { _, old ->
+                old ?: pluginWatchKey.directoryBlocking(kotlinIdeVersion)?.registerSafe(
+                    StandardWatchEventKinds.ENTRY_MODIFY,
+                    StandardWatchEventKinds.ENTRY_DELETE,
+                )
+            }
+
+            if (new != null) {
+                pluginWatchKeysReverse[new] = pluginWatchKey
             }
 
             if (paths.any { knownByIde[it.mavenId]?.jar?.checksum != it.jar?.checksum }) {
@@ -561,68 +774,102 @@ class KotlinPluginsStorage(
     private fun findArtifactAndUpdateMap(
         pluginMap: ConcurrentHashMap<ResolvedPluginKey, ArtifactState>,
         requested: RequestedKotlinPluginDescriptor,
-        kotlinVersion: String,
+        kotlinIdeVersion: String,
+        pluginWatchKey: VersionedPluginKey,
     ): StoredJar {
-        val foundInFiles by lazy {
-            findJarPath(requested, kotlinVersion)
-        }
-
-        var searchedInFiles = false
-
         val resolvedPlugin = ResolvedPluginKey(requested.artifact, requested.version)
-        val path = pluginMap.compute(resolvedPlugin) { _, old ->
+        val state = pluginMap.compute(resolvedPlugin) { _, old ->
             when {
                 old is ArtifactState.Cached && Files.exists(old.jar.path) -> old
-                else -> {
-                    searchedInFiles = true
-
-                    val found = foundInFiles?.second
-                        ?: return@compute null
-                    val checksum = runCatching { md5(found).asChecksum() }.getOrNull()
-                        ?: return@compute null
-
-                    val jar = Jar(
-                        path = found,
-                        checksum = checksum,
-                    )
-
-                    discoveryPublisher.discoveredSync(
-                        pluginName = requested.descriptor.name,
-                        mavenId = requested.artifact.id,
-                        version = requested.version,
-                        jar = jar.path,
-                    )
-
-                    ArtifactState.Cached(
-                        jar = jar,
-                        requestedVersion = requested.version,
-                        actualVersion = requested.version,
-                        criteria = requested.descriptor.versionMatching,
-                    )
-                }
+                else -> null
             }
         }
 
-        val locatedVersion = if (searchedInFiles) {
-            foundInFiles?.first
-        } else {
-            requested.version
+        if (state != null) {
+            return StoredJar(
+                mavenId = requested.artifact.id,
+                locatedVersion = requested.version,
+                jar = (state as ArtifactState.Cached).jar,
+            )
         }
+
+        val (foundVersion, found) = findJarPath(requested, kotlinIdeVersion, pluginWatchKey)
+            ?: return StoredJar(
+                mavenId = requested.artifact.id,
+                locatedVersion = requested.version,
+                jar = null,
+            )
+
+        val checksum = runCatching { md5(found).asChecksum() }.getOrNull()
+            ?: return StoredJar(
+                mavenId = requested.artifact.id,
+                locatedVersion = requested.version,
+                jar = null,
+            )
+
+        val original = found.resolveOriginalJarFile()
+
+        if (original != null && checksum != md5(original).asChecksum()) {
+            runCatching { Files.deleteIfExists(found) }
+
+            logger.debug("Checksums don't match with the original jar for ${requested.artifact.id} (${requested.version})")
+
+            return StoredJar(
+                mavenId = requested.artifact.id,
+                locatedVersion = requested.version,
+                jar = null,
+            )
+        }
+
+        val jarKey = JarId(requested.descriptor.name, requested.artifact.id, foundVersion)
+
+        val watchKeyWithChecksum = originalWatchKeys.compute(jarKey) { _, old ->
+            if (old?.checksum != checksum) {
+                old?.key?.cancel()
+
+                original?.parent?.registerSafe(StandardWatchEventKinds.ENTRY_MODIFY)
+                    ?.let { WatchKeyWithChecksum(it, checksum) }
+            } else old
+        }
+
+        if (watchKeyWithChecksum != null) {
+            originalWatchKeysReverse[watchKeyWithChecksum.key] = jarKey
+        }
+
+        val jar = Jar(
+            path = found,
+            checksum = checksum,
+        )
+
+        val newState = ArtifactState.Cached(
+            jar = jar,
+            requestedVersion = requested.version,
+            actualVersion = foundVersion,
+            criteria = requested.descriptor.versionMatching,
+        )
+
+        pluginMap[resolvedPlugin] = newState
+
+        discoveryPublisher.discoveredSync(
+            pluginName = requested.descriptor.name,
+            mavenId = requested.artifact.id,
+            version = requested.version,
+            jar = jar.path,
+        )
 
         return StoredJar(
             mavenId = requested.artifact.id,
-            locatedVersion = locatedVersion,
-            jar = (path as? ArtifactState.Cached)?.jar,
+            locatedVersion = foundVersion,
+            jar = jar,
         )
     }
 
     private fun findJarPath(
         requested: RequestedKotlinPluginDescriptor,
-        kotlinVersion: String,
-    ): Pair<String, Path>? {
-        val basePath = cacheDirBlocking()
-            ?.resolve(kotlinVersion)
-            ?.resolve(requested.artifact.getPluginGroupPath())
+        kotlinIdeVersion: String,
+        pluginWatchKey: VersionedPluginKey,
+    ): Pair<String, Path>? = runCatching {
+        val basePath = pluginWatchKey.directoryBlocking(kotlinIdeVersion)
             ?: return null
 
         if (!Files.exists(basePath)) {
@@ -630,7 +877,7 @@ class KotlinPluginsStorage(
         }
 
         val candidates = basePath
-            .listDirectoryEntries("${requested.artifact.artifactId}-$kotlinVersion-*.jar")
+            .listDirectoryEntries("${requested.artifact.artifactId}-$kotlinIdeVersion-*.jar")
             .toList()
 
         logger.debug("Candidates for ${requested.artifact.id}:${requested.version} -> ${candidates.map { it.fileName }}")
@@ -638,14 +885,14 @@ class KotlinPluginsStorage(
         val versionToPath = candidates
             .associateBy {
                 it.name
-                    .substringAfter("${requested.artifact.artifactId}-$kotlinVersion-")
+                    .substringAfter("${requested.artifact.artifactId}-$kotlinIdeVersion-")
                     .substringBefore(".jar")
             }
 
         val latest = getMatching(versionToPath.keys.toList(), "", requested.asMatchFilter())
 
         return latest?.let { it to versionToPath.getValue(it) }
-    }
+    }.getOrNull()
 
     @Suppress("UnstableApiUsage")
     private inline fun resolveCacheDir(getApi: () -> EelApi): Path? {
@@ -683,4 +930,27 @@ class KotlinPluginsStorage(
         val mavenId: MavenId,
         val libVersion: String,
     )
+
+    private fun Watchable.registerSafe(vararg events: WatchEvent.Kind<*>): WatchKey? {
+        return try {
+            register(watchService, *events)
+        } catch (e: Exception) {
+            logger.warn("Failed to register watch key for $this", e)
+            null
+        }
+    }
+
+    private suspend fun VersionedPluginKey.directory(kotlinIdeVersion: String): Path? {
+        return cacheDir()
+            ?.resolve(kotlinIdeVersion)
+            ?.resolve(pluginName)
+            ?.resolve(version)
+    }
+
+    private fun VersionedPluginKey.directoryBlocking(kotlinIdeVersion: String): Path? {
+        return cacheDirBlocking()
+            ?.resolve(kotlinIdeVersion)
+            ?.resolve(pluginName)
+            ?.resolve(version)
+    }
 }

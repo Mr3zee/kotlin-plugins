@@ -201,11 +201,8 @@ class KotlinPluginsExceptionReporterImpl(
             KotlinPluginsNotificationBallon.notify(project, disabledPlugin = plugin.name)
         } else {
             // trigger editor notification across all Kotlin files
-            project.service<KotlinPluginsNotifications>().activate(plugin.name)
-
-            ApplicationManager.getApplication().invokeLater {
-                EditorNotifications.getInstance(project).updateAllNotifications()
-            }
+            project.service<KotlinPluginsNotifications>().activate(plugin.name, ids.map { it.version })
+            refreshNotifications()
         }
     }
 
@@ -221,6 +218,9 @@ class KotlinPluginsExceptionReporterImpl(
                 }
             }
 
+            project.service<KotlinPluginsNotifications>().deactivate(discovery.pluginName, discovery.version)
+            refreshNotifications()
+
             processDiscovery(discovery)
         }
 
@@ -228,6 +228,12 @@ class KotlinPluginsExceptionReporterImpl(
             state.getAndSet(null)?.close()
             stackTraceMap.clear()
             caughtExceptions.clear()
+        }
+    }
+
+    private fun refreshNotifications() {
+        ApplicationManager.getApplication().invokeLater {
+            EditorNotifications.getInstance(project).updateAllNotifications()
         }
     }
 

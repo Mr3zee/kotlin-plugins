@@ -35,6 +35,8 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
             return Function { null }
         }
 
+        val grouped = pluginNames.groupBy { it.pluginName }
+
         fun cleanPanel() {
             notificationsState.clear()
             EditorNotifications.getInstance(project).updateAllNotifications()
@@ -42,18 +44,18 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
 
         return Function { editor ->
             val panel = EditorNotificationPanel(editor,EditorNotificationPanel.Status.Error)
-            val pluginWord = "plugin".pluralizeIf(pluginNames.size > 1)
-            val beWord = if (pluginNames.size == 1) "is" else "are"
-            val pluginsText = pluginNames.joinToString(", ") { "'${it}'" }
+            val pluginWord = "plugin".pluralizeIf(grouped.size > 1)
+            val beWord = if (grouped.size == 1) "is" else "are"
+            val pluginsText = grouped.keys.joinToString(", ") { "'${it}'" }
 
             panel.text = "Kotlin external compiler $pluginWord $pluginsText $beWord throwing exceptions."
             panel.icon(KotlinPluginsIcons.Logo)
 
-            val disableSuffix = if (pluginNames.size == 1) "" else " all"
+            val disableSuffix = if (grouped.size == 1) "" else " all"
 
             panel.createActionLabel("Disable$disableSuffix") {
                 val settings = project.service<KotlinPluginsSettings>()
-                settings.disablePlugins(pluginNames)
+                settings.disablePlugins(pluginNames.map { it.pluginName })
 
                 cleanPanel()
             }
@@ -63,7 +65,7 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
                 analyzer.updateState(enabled = true, autoDisable = true)
 
                 val settings = project.service<KotlinPluginsSettings>()
-                settings.disablePlugins(pluginNames)
+                settings.disablePlugins(pluginNames.map { it.pluginName })
 
                 cleanPanel()
             }

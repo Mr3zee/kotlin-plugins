@@ -7,13 +7,19 @@ import com.intellij.openapi.components.Service
  * shown when a Kotlin external plugin is detected to throw exceptions.
  */
 @Service(Service.Level.PROJECT)
-class KotlinPluginsNotifications {
+internal class KotlinPluginsNotifications {
     @Volatile
-    private var activePlugins: Set<String> = emptySet()
+    private var activePlugins: Set<VersionedPluginKey> = emptySet()
 
-    fun activate(pluginName: String) {
+    fun activate(pluginName: String, versions: List<String>) {
         synchronized(this) {
-            activePlugins = activePlugins + pluginName
+            activePlugins = activePlugins + versions.map { VersionedPluginKey(pluginName, it) }
+        }
+    }
+
+    fun deactivate(pluginName: String, version: String) {
+        synchronized(this) {
+            activePlugins = activePlugins - VersionedPluginKey(pluginName, version)
         }
     }
 
@@ -21,5 +27,5 @@ class KotlinPluginsNotifications {
         synchronized(this) { activePlugins = emptySet() }
     }
 
-    fun currentPlugins(): Set<String> = activePlugins
+    fun currentPlugins(): Set<VersionedPluginKey> = activePlugins
 }

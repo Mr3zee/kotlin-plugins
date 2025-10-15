@@ -239,13 +239,13 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
         val generalContent = JPanel(BorderLayout())
 
-        val kotlinVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
         val generalForm = panel {
             row {
                 val copyKotlinAction = object : AnAction(AllIcons.Actions.Copy) {
                     override fun actionPerformed(e: AnActionEvent) {
-                        val selection = StringSelection(kotlinVersion)
+                        val selection = StringSelection(kotlinIdeVersion)
                         Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
 
                         JBPopupFactory.getInstance()
@@ -259,7 +259,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 }
 
                 actionButton(copyKotlinAction)
-                    .label("<html>Kotlin Compiler IDE version: <strong>$kotlinVersion</strong></html>")
+                    .label("<html>Kotlin Compiler IDE version: <strong>$kotlinIdeVersion</strong></html>")
             }
 
             group("Exception Analyzer") {
