@@ -18,6 +18,7 @@ import kotlinx.coroutines.supervisorScope
 data class JarId(
     val pluginName: String,
     val mavenId: String,
+    val version: String,
 )
 
 interface KotlinPluginsExceptionReporter {
@@ -25,9 +26,9 @@ interface KotlinPluginsExceptionReporter {
 
     suspend fun lookFor(): Map<JarId, Set<String>>
 
-    fun matched(id: JarId, exception: Throwable, cutoutIndex: Int, autoDisable: Boolean)
+    fun matched(ids: List<JarId>, exception: Throwable, autoDisable: Boolean)
 
-    fun hasExceptions(pluginName: String, mavenId: String): Boolean
+    fun hasExceptions(pluginName: String, mavenId: String, version: String): Boolean
 }
 
 class KotlinPluginsExceptionReporterImpl(
@@ -84,7 +85,7 @@ class KotlinPluginsExceptionReporterImpl(
     }
 
     private fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
-        val jarId = JarId(discovery.pluginName, discovery.mavenId)
+        val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
         stackTraceMap.remove(jarId)
 
         when (val result = KotlinPluginsJarAnalyzer.analyze(discovery.jar)) {
@@ -105,29 +106,44 @@ class KotlinPluginsExceptionReporterImpl(
 
         initialized.await()
 
-        return stackTraceMap
+        return stackTraceMap.toMap()
     }
 
     private val caughtExceptions = mutableMapOf<String, List<CaughtException>>()
 
     private class CaughtException(
-        val mavenId: String,
+        val jarId: JarId,
         val exception: Throwable,
-        val cutoutIndex: Int,
     )
 
-    override fun matched(id: JarId, exception: Throwable, cutoutIndex: Int, autoDisable: Boolean) {
+    override fun matched(ids: List<JarId>, exception: Throwable, autoDisable: Boolean) {
         val settings = project.service<KotlinPluginsSettings>()
-        val plugin = settings.pluginByName(id.pluginName) ?: return
+
+        ids.groupBy { it.pluginName }.forEach { (pluginName, ids) ->
+            matched(settings, pluginName, ids, exception, autoDisable)
+        }
+    }
+
+    private fun matched(
+        settings: KotlinPluginsSettings,
+        pluginName: String,
+        ids: List<JarId>,
+        exception: Throwable,
+        autoDisable: Boolean,
+    ) {
+        val plugin = settings.pluginByName(pluginName) ?: return
 
         // store anyway to display in UI
-        caughtExceptions.compute(id.pluginName) { _, old ->
-            (old.orEmpty() + CaughtException(id.mavenId, exception, cutoutIndex)).let { new ->
+        caughtExceptions.compute(pluginName) { _, old ->
+            val exceptions = ids.map { CaughtException(it, exception) }
+            (old.orEmpty() + exceptions).let { new ->
                 new.drop((new.size - EXCEPTIONS_CACHE_SIZE).coerceAtLeast(0))
             }
         }
 
-        statusPublisher.updateArtifact(id.pluginName, id.mavenId, ArtifactStatus.ExceptionInRuntime)
+        ids.forEach { id ->
+            statusPublisher.updateVersion(id.pluginName, id.mavenId, id.version, ArtifactStatus.ExceptionInRuntime)
+        }
 
         if (plugin.ignoreExceptions) {
             return
@@ -147,17 +163,19 @@ class KotlinPluginsExceptionReporterImpl(
         }
     }
 
-    override fun hasExceptions(pluginName: String, mavenId: String): Boolean {
-        return caughtExceptions[pluginName].orEmpty().any { it.mavenId == mavenId }
+    override fun hasExceptions(pluginName: String, mavenId: String, version: String): Boolean {
+        return caughtExceptions[pluginName].orEmpty().any { it.jarId.mavenId == mavenId && it.jarId.version == version }
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
         override fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
-            processDiscovery(discovery)
-
             caughtExceptions.compute(discovery.pluginName) { _, old ->
-                old.orEmpty().filterNot { it.mavenId == discovery.mavenId }
+                old.orEmpty().filterNot {
+                    it.jarId.mavenId == discovery.mavenId && it.jarId.version == discovery.version
+                }
             }
+
+            processDiscovery(discovery)
         }
 
         override fun reset() {

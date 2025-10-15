@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Handler
 import java.util.logging.LogRecord
+import kotlin.collections.component1
+import kotlin.collections.component2
 
 class KotlinPluginsExceptionAnalyzerState : BaseState() {
     var enabled by property(true)
@@ -34,7 +36,8 @@ class KotlinPluginsExceptionAnalyzerState : BaseState() {
 class KotlinPluginsExceptionAnalyzerService(
     private val project: Project,
     private val scope: CoroutineScope,
-) : SimplePersistentStateComponent<KotlinPluginsExceptionAnalyzerState>(KotlinPluginsExceptionAnalyzerState()), Disposable {
+) : SimplePersistentStateComponent<KotlinPluginsExceptionAnalyzerState>(KotlinPluginsExceptionAnalyzerState()),
+    Disposable {
     private val logger by lazy { thisLogger() }
     private val handler: AtomicReference<Handler?> = AtomicReference(null)
     val supervisorJob = SupervisorJob(scope.coroutineContext.job)
@@ -73,16 +76,18 @@ class KotlinPluginsExceptionAnalyzerService(
 
                 val reporter = project.service<KotlinPluginsExceptionReporter>()
 
-                reporter.lookFor().forEach { (mavenId, fqNames) ->
-                    val indexOfLast = exception.stackTrace.indexOfLast { trace ->
-                        fqNames.any { fq -> trace.className == fq }
-                    }
+                val lookup = reporter.lookFor()
 
-                    if (indexOfLast != -1) {
-                        logger.debug("Exception detected for $mavenId: ${exception.message}")
-                        reporter.matched(mavenId, exception, indexOfLast, autoDisable = state.autoDisable)
-                    }
-                }
+                lookup.entries.find { (jarId, fqNames) ->
+                    exception.stackTrace.any { it.className in fqNames }
+                } ?: continue
+
+                val ids = match(lookup, exception)
+                    .takeIf { it.isNotEmpty() }
+                    ?: return@launch
+
+                logger.debug("Exception detected for $ids: ${exception.message}")
+                reporter.matched(ids.toList(), exception, autoDisable = state.autoDisable)
             }
         }
 
@@ -131,6 +136,19 @@ class KotlinPluginsExceptionAnalyzerService(
             val handler = handler.getAndSet(null)
             rootLogger().removeHandler(handler)
             handler?.close()
+        }
+    }
+
+    companion object {
+        internal fun match(lookup: Map<JarId, Set<String>>, exception: Throwable): Set<JarId> {
+            return exception.stackTrace
+                .map { trace ->
+                    lookup.entries
+                        .filter { (_, fqNames) -> trace.className in fqNames }
+                        .map { it.key }.toSet()
+                }
+                .filter { it.isNotEmpty() }
+                .reduce { acc, set -> acc.intersect(set) }
         }
     }
 }

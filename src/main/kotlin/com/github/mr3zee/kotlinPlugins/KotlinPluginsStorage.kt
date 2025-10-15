@@ -247,7 +247,7 @@ class KotlinPluginsStorage(
 
         val reporter = project.service<KotlinPluginsExceptionReporter>()
         forEachState { pluginName, mavenId, libVersion, state ->
-            val status = if (state is ArtifactState.Cached && reporter.hasExceptions(pluginName, mavenId)) {
+            val status = if (state is ArtifactState.Cached && reporter.hasExceptions(pluginName, mavenId, libVersion)) {
                 ArtifactStatus.ExceptionInRuntime
             } else {
                 state.toStatus()
@@ -359,9 +359,47 @@ class KotlinPluginsStorage(
             bundle.locatorResults.entries.forEach { (id, locatorResult) ->
                 val reporter = project.service<KotlinPluginsExceptionReporter>()
 
+                val resolvedKey = ResolvedPluginKey(id, locatorResult.libVersion)
+                val requestedKey = ResolvedPluginKey(id, plugin.version)
+
+
+                fun updateMap(key: ResolvedPluginKey): Boolean {
+                    var isNew = false
+                    artifactsMap.compute(key) { _, old ->
+                        val oldChecksum = (old as? ArtifactState.Cached)?.jar?.checksum
+                        if (locatorResult is LocatorResult.Cached && locatorResult.jar.checksum != oldChecksum) {
+                            isNew = true
+                            anyJarChanged.compareAndSet(false, true)
+                        }
+
+                        locatorResult.state
+                    }
+
+                    return isNew
+                }
+
+                val resolvedIsNew = if (resolvedKey.libVersion != requestedKey.libVersion) {
+                    updateMap(requestedKey)
+                    updateMap(resolvedKey)
+                } else {
+                    updateMap(resolvedKey)
+                }
+
+                if (resolvedIsNew) {
+                    locatorResult as LocatorResult.Cached
+
+                    discoveryPublisher.discoveredSync(
+                        pluginName = descriptor.name,
+                        mavenId = id.id,
+                        version = locatorResult.state.actualVersion,
+                        jar = locatorResult.jar.path,
+                    )
+                }
+
                 val status = if (
+                    !resolvedIsNew &&
                     locatorResult is LocatorResult.Cached &&
-                    reporter.hasExceptions(plugin.descriptor.name, id.id)
+                    reporter.hasExceptions(plugin.descriptor.name, id.id, locatorResult.libVersion)
                 ) {
                     ArtifactStatus.ExceptionInRuntime
                 } else {
@@ -374,41 +412,6 @@ class KotlinPluginsStorage(
                     version = locatorResult.libVersion,
                     status = status,
                 )
-
-                val resolvedKey = ResolvedPluginKey(id, locatorResult.libVersion)
-                val requestedKey = ResolvedPluginKey(id, plugin.version)
-
-                fun updateMap(key: ResolvedPluginKey, updateDiscovery: Boolean) {
-                    var isNew = false
-
-                    artifactsMap.compute(key) { _, old ->
-                        val oldChecksum = (old as? ArtifactState.Cached)?.jar?.checksum
-                        if (locatorResult is LocatorResult.Cached && locatorResult.jar.checksum != oldChecksum) {
-                            isNew = true
-                            anyJarChanged.compareAndSet(false, true)
-                        }
-
-                        locatorResult.state
-                    }
-
-                    if (updateDiscovery && isNew) {
-                        locatorResult as LocatorResult.Cached
-
-                        discoveryPublisher.discoveredSync(
-                            pluginName = descriptor.name,
-                            mavenId = id.id,
-                            version = locatorResult.state.actualVersion,
-                            jar = locatorResult.jar.path,
-                        )
-                    }
-                }
-
-                if (resolvedKey.libVersion != requestedKey.libVersion) {
-                    updateMap(resolvedKey, updateDiscovery = true)
-                    updateMap(requestedKey, updateDiscovery = false)
-                } else {
-                    updateMap(resolvedKey, updateDiscovery = true)
-                }
             }
 
             statusPublisher.redraw()

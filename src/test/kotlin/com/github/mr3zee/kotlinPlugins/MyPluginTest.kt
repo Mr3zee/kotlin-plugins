@@ -261,6 +261,37 @@ class MyPluginTest : BasePlatformTestCase() {
         )
     }
 
+    fun testStacktraceMatcher() {
+        val exception = runCatching {
+            ExceptionClassA().bar()
+        }.exceptionOrNull() ?: error("Failed to get exception")
+
+        val matched = KotlinPluginsExceptionAnalyzerService.match(
+            mapOf(
+                JarId("1", "1", "1") to setOf(
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassB",
+                ),
+                JarId("1", "1", "2") to setOf(
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassB",
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassC",
+                ),
+                JarId("1", "1", "3") to setOf(
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassB",
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassC",
+                ),
+                JarId("1", "1", "4") to setOf(
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
+                ),
+            ),
+            exception,
+        ).map { it.version }
+
+        assertSameElements(matched, listOf("2", "3"))
+    }
+
     private fun loadAndAnalyzeJar(name: String): Set<String> {
         val jarUrl = MyPluginTest::class.java.getResource("/$name")
             ?: error("Failed to load jar")
@@ -270,5 +301,23 @@ class MyPluginTest : BasePlatformTestCase() {
         assert(result is KotlinPluginsAnalyzedJar.Success)
         val analyzedJar = result as KotlinPluginsAnalyzedJar.Success
         return analyzedJar.fqNames
+    }
+}
+
+class ExceptionClassA {
+    fun bar() {
+        ExceptionClassB().foo()
+    }
+}
+
+class ExceptionClassB {
+    fun foo() {
+        ExceptionClassC().baz()
+    }
+}
+
+class ExceptionClassC {
+    fun baz() {
+        throw Exception("foo")
     }
 }
