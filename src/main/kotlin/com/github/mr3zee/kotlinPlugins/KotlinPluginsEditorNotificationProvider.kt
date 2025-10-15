@@ -74,8 +74,6 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
                 // todo update state to show error panel
 
                 KotlinPluginsToolWindowFactory.show(project)
-
-                cleanPanel()
             }
 
             panel.setCloseAction {
