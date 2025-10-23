@@ -287,7 +287,7 @@ class MyPluginTest : BasePlatformTestCase() {
                 ),
             ),
             exception,
-        ).map { it.version }
+        ).orEmpty().map { it.version }
 
         assertSameElements(matched, listOf("2", "3"))
     }

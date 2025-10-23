@@ -1,6 +1,7 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.icons.AllIcons
+import com.intellij.ide.actions.RevealFileAction
 import com.intellij.ide.projectView.PresentationData
 import com.intellij.ide.util.treeView.PresentableNodeDescriptor
 import com.intellij.openapi.Disposable
@@ -11,6 +12,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
@@ -20,23 +22,47 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.markup.HighlighterLayer
+import com.intellij.openapi.editor.markup.HighlighterTargetArea
+import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.AnimatedIcon
+import com.intellij.ui.EditorTextField
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.TitledSeparator
 import com.intellij.ui.TreeUIHelper
+import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTabbedPane
+import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.AlignY
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.LabelPosition
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.Row
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.builder.rows
+import com.intellij.ui.dsl.listCellRenderer.listCellRenderer
 import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
+import com.jgoodies.forms.factories.Borders
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,12 +70,34 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.Font
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
+import java.awt.LayoutManager
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
+import java.awt.font.TextAttribute
+import java.util.function.Consumer
+import javax.swing.BorderFactory
+import javax.swing.Box
+import javax.swing.DefaultListModel
+import javax.swing.Icon
 import javax.swing.JComponent
+import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JScrollPane
+import javax.swing.ListCellRenderer
 import javax.swing.ScrollPaneConstants
+import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreeNode
+import javax.swing.tree.TreePath
+import javax.swing.tree.TreeSelectionModel
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.io.path.isDirectory
 
 class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(
@@ -62,7 +110,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         val toolWindowPanel = SimpleToolWindowPanel(false, true)
 
-        val state = TreeState.getInstance(project)
+        val state = KotlinPluginsTreeState.getInstance(project)
         val (panel, tree) = createDiagnosticsPanel(project, state)
 
         val splitter = OnePixelSplitter(
@@ -72,8 +120,26 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
             /* maxProp = */ 0.7f,
         ).apply {
             firstComponent = panel
-            secondComponent = createPanel("Log tab is empty")
         }
+
+        // Overview + Logs tabs
+        val overviewPanel = OverviewPanel(project, state, tree)
+        tree.overviewPanel = overviewPanel
+        val tabs = JBTabbedPane()
+        tabs.addTab("Overview", overviewPanel.component)
+        tabs.addTab("Logs", createPanel("Logs tab is empty"))
+        splitter.secondComponent = tabs
+
+        // Tree selection -> state + overview refresh
+        tree.addTreeSelectionListener {
+            val node = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)
+            val data = node?.userObject as? NodeData ?: return@addTreeSelectionListener
+            val key = data.key
+            state.selectedNodeKey = key
+            overviewPanel.updater.redraw()
+        }
+        // initial paint
+        overviewPanel.updater.redraw()
 
         toolWindowPanel.setContent(splitter)
 
@@ -82,6 +148,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         Disposer.register(content) {
             tree.dispose()
+            overviewPanel.dispose()
         }
 
         contentManager.addContent(content)
@@ -96,7 +163,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
     private fun createDiagnosticsPanel(
         project: Project,
-        state: TreeState,
+        state: KotlinPluginsTreeState,
     ): Pair<JComponent, KotlinPluginsTree> {
         val panel = JPanel(BorderLayout())
         val settings = project.service<KotlinPluginsSettings>()
@@ -211,6 +278,723 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 }
 
+internal class OverviewPanel(
+    private val project: Project,
+    private val state: KotlinPluginsTreeState,
+    private val tree: KotlinPluginsTree,
+) : Disposable {
+    val component: JPanel = JPanel(BorderLayout()).apply {
+        border = BorderFactory.createEmptyBorder(0, 0, 0, 0)
+    }
+
+    val updater = object : KotlinPluginStatusUpdater {
+        override fun updatePlugin(pluginName: String, status: ArtifactStatus) {
+            refreshIfAffectsSelection(pluginName)
+        }
+
+        override fun updateArtifact(pluginName: String, mavenId: String, status: ArtifactStatus) {
+            // artifact status will be recomputed from versions on demand
+            refreshIfAffectsSelection(pluginName, mavenId)
+        }
+
+        override fun updateVersion(pluginName: String, mavenId: String, version: String, status: ArtifactStatus) {
+            refreshIfAffectsSelection(pluginName, mavenId, version)
+        }
+
+        override fun reset() {
+            render()
+        }
+
+        override fun redraw() {
+            render()
+        }
+    }
+
+    init {
+        state.onSelectedState(::render)
+        render()
+    }
+
+    private fun refreshIfAffectsSelection(pluginName: String, mavenId: String? = null, version: String? = null) {
+        val selectedKey = state.selectedNodeKey
+        val (p, m, v) = parseKey(selectedKey)
+        if (p == null) return
+        if (p != pluginName) return
+        if (mavenId == null || m == null || mavenId == m) {
+            if (version == null || v == null || version == v) {
+                SwingUtilities.invokeLater { render() }
+            }
+        }
+    }
+
+    private fun parseKey(key: String?): Triple<String?, String?, String?> {
+        if (key == null) return Triple(null, null, null)
+        val parts = key.split("::")
+        return when (parts.size) {
+            1 -> Triple(parts[0], null, null)
+            2 -> Triple(parts[0], parts[1], null)
+            else -> Triple(parts[0], parts[1], parts[2])
+        }
+    }
+
+    private fun render() {
+        val selectedKey = state.selectedNodeKey
+        val status = tree.statusForKey(selectedKey)
+        val (plugin, mavenId, version) = parseKey(selectedKey)
+
+        val parentPanel = JPanel(BorderLayout()).apply {
+            border = BorderFactory.createEmptyBorder(0, 0, 0, 0)
+        }
+
+        fun <T : JComponent> addRoot(component: T, constraints: Any? = null): T {
+            if (constraints != null) {
+                parentPanel.add(component, constraints)
+            } else {
+                parentPanel.add(component)
+            }
+            return component
+        }
+
+        fun addRootPanel(
+            constraints: Any? = null,
+            customiseComponent: (DialogPanel) -> Unit = {},
+            init: Panel.() -> Unit,
+        ): JScrollPane {
+            val panel = panel(init).apply(customiseComponent)
+            val scroll = ScrollPaneFactory.createScrollPane(
+                panel,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+            ).apply {
+                border = BorderFactory.createEmptyBorder(0, 0, 0, 0)
+            }
+
+            return addRoot(scroll, constraints)
+        }
+
+        when {
+            plugin == null -> {
+                addRoot(GrayedLabel("Select a plugin to view details."), BorderLayout.CENTER)
+                    .align(SwingConstants.CENTER)
+            }
+
+            mavenId == null -> {
+                addRoot(
+                    component = header(
+                        type = NodeType.Plugin,
+                        status = status,
+                        plugin = plugin,
+                    ),
+                    constraints = BorderLayout.NORTH,
+                )
+
+                addRoot(pluginVersionPanels(NodeType.Plugin, status, plugin))
+            }
+
+            version == null -> {
+                addRoot(
+                    component = header(
+                        type = NodeType.Artifact,
+                        status = status,
+                        plugin = plugin,
+                        mavenId = mavenId,
+                    ),
+                    constraints = BorderLayout.NORTH,
+                )
+
+                addRoot(pluginVersionPanels(NodeType.Artifact, status, plugin))
+            }
+
+            else -> {
+                addRoot(
+                    component = header(
+                        type = NodeType.Version,
+                        status = status,
+                        plugin = plugin,
+                        mavenId = mavenId,
+                        version = version,
+                    ),
+                    constraints = BorderLayout.NORTH,
+                )
+
+                when (status ?: ArtifactStatus.InProgress) {
+                    ArtifactStatus.InProgress -> {
+                        addRoot(inProgressPanel(NodeType.Version))
+                    }
+
+                    ArtifactStatus.Disabled -> {
+                        addRoot(disabledPanel(NodeType.Version, plugin))
+                    }
+
+                    ArtifactStatus.Skipped -> {
+                        addRoot(skippedPanel(NodeType.Version))
+                    }
+
+                    is ArtifactStatus.Success, is ArtifactStatus.ExceptionInRuntime -> {
+                        val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
+                        if (analyzer.state.enabled) {
+                            addRootPanel(customiseComponent = {
+                                it.maximumSize.width = 600
+                                it.minimumSize.width = 270
+                                it.preferredSize.width = 600
+                                it.preferredSize.height = 270
+                            }) {
+                                val reporter = project.service<KotlinPluginsExceptionReporter>()
+                                val report = reporter.getExceptionsReport(plugin, mavenId, version)
+
+                                if (status is ArtifactStatus.ExceptionInRuntime && report != null) {
+                                    row {
+                                        label("Exception(s) occurred in runtime")
+                                            .comment(
+                                                """
+                                                    A compiler plugin must never throw an exception<br/>
+                                                    Instead it must report errors using diagnostics<br/>
+                                                """.trimIndent()
+                                            )
+                                    }
+
+                                    separator()
+
+                                    val exceptionsAnalysis = when {
+                                        report.kotlinVersionMismatch != null && report.isProbablyIncompatible -> {
+                                            """
+                                                <strong>Exceptions Analysis</strong><br/>
+                                                <br/>
+                                                The version of the plugin is not compatible with the version of the IDE.<br/>
+                                                This may be the cause for the exceptions thrown.<br/>
+                                                Compiler API is not binary compatible between Kotlin versions.<br/>
+                                                <br/>
+                                                Indicated Kotlin version in the jar: ${report.kotlinVersionMismatch.jarVersion}<br/>
+                                                In IDE Kotlin version: ${report.kotlinVersionMismatch.ideVersion}<br/>
+                                                <br/>
+                                            """.trimIndent()
+                                        }
+
+                                        report.isProbablyIncompatible -> {
+                                            val kotlinIdeVersion = project.service<KotlinVersionService>()
+                                                .getKotlinIdePluginVersion()
+
+                                            """
+                                                <strong>Exceptions Analysis</strong><br/>
+                                                <br/>
+                                                Exceptions thrown are likely to be the sign of a binary incompatibility
+                                                between the Kotlin version of the IDE and the Kotlin version of the plugin.<br/>
+                                                The plugin indicates that the Kotlin version match, however this might not be the case.<br/>
+                                                <br/>
+                                                In IDE Kotlin version: $kotlinIdeVersion<br/>
+                                                <br/>
+                                            """.trimIndent()
+                                        }
+
+                                        else -> ""
+                                    }
+
+                                    val actionSuggestion = when {
+                                        report.reloadedSame && report.isLocal -> {
+                                            """
+                                                <strong>Action suggestion</strong><br/>
+                                                <br/>
+                                                The jar was loaded from a local source 
+                                                and was reloaded at least once with the same content so the exception persists 
+                                                (for example, during a manual or a background update).<br/>
+                                                If you are developing the plugin, try changing its logic 
+                                                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
+                                            """.trimIndent()
+                                        }
+
+                                        report.isLocal -> {
+                                            """
+                                                <strong>Action suggestion</strong><br/>
+                                                <br/>
+                                                The jar was loaded from a local source.<br/>
+                                                If you are developing the plugin, try changing its logic 
+                                                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
+                                            """.trimIndent()
+                                        }
+
+                                        report.reloadedSame -> {
+                                            """
+                                                <strong>Action suggestion</strong><br/>
+                                                <br/>
+                                                The jar was loaded from a remote source 
+                                                and was reloaded at least once with the same content so the exception persists 
+                                                (for example, during a manual or a background update).<br/>
+                                                If you are developing the plugin, try changing its logic 
+                                                and republishing it to the same place and run 'Update' action<br/>
+                                            """.trimIndent()
+                                        }
+
+                                        report.kotlinVersionMismatch != null -> {
+                                            """
+                                                <strong>Action suggestion</strong><br/>
+                                                <br/>
+                                                The jar was loaded unsafely, using a fallback without the compatibilities guarantee.<br/>
+                                                If you are developing the plugin, try publishing it with the same Kotlin version as the IDE.<br/>
+                                                If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
+                                            """.trimIndent()
+                                        }
+
+                                        else -> """
+                                            <strong>Action suggestion</strong><br/>
+                                            <br/>
+                                            If you are developing the plugin - you need to check the exceptions and replace them with diagnostics.<br/>
+                                            If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
+                                        """.trimIndent()
+                                    }
+
+                                    val hint = """
+                                        |<html>
+                                        |$exceptionsAnalysis
+                                        |$actionSuggestion
+                                        |</html>
+                                    """.trimMargin()
+
+                                    row { label(hint) }
+
+                                    row {
+                                        button("Create Report") {
+                                            // todo
+                                        }
+                                    }
+
+                                    separator()
+
+                                    val exceptionPanes = mutableListOf<Pair<EditorTextField, Throwable>>()
+                                    report.exceptions.forEachIndexed { index, ex ->
+                                        val groupTitle = "#${index + 1}: ${ex::class.java.name}: ${ex.message ?: ""}"
+                                        val group = collapsibleGroup(groupTitle) {
+                                            val (text, ranges) = exceptionTextAndHighlights(ex, emptySet())
+                                            val editor = createExceptionEditor(text, ranges)
+                                            row { cell(editor) }
+                                            exceptionPanes.add(editor to ex)
+                                        }
+
+                                        fun updateTitle() {
+                                            setEllipsized(this@OverviewPanel.component, labelFont, groupTitle) {
+                                                group.setTitle(it)
+                                            }
+                                        }
+
+                                        updateTitle()
+
+                                        component.addComponentListener(object : ComponentAdapter() {
+                                            override fun componentShown(e: ComponentEvent) {
+                                                updateTitle()
+                                            }
+                                            override fun componentResized(e: ComponentEvent) {
+                                                updateTitle()
+                                            }
+                                        })
+                                    }
+
+                                    loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
+                                        ApplicationManager.getApplication().invokeLater {
+                                            exceptionPanes.forEach { (pane, throwable) ->
+                                                updateExceptionEditor(pane, throwable, names)
+                                            }
+                                        }
+                                    }
+
+                                    separator()
+                                } else if (status == ArtifactStatus.ExceptionInRuntime && report == null) {
+                                    row {
+                                        label("Failed to show exceptions.")
+                                            .comment("This is probably due to a bug in our IntelliJ plugin.")
+                                    }
+
+                                    separator()
+                                }
+
+                                if (status is ArtifactStatus.ExceptionInRuntime || status is ArtifactStatus.Success) {
+                                    val model = DefaultListModel<String>()
+                                    var list: JComponent? = null
+                                    row {
+                                        list = jbList(
+                                            label = "Analyzed classes in jar:",
+                                            icon = AllIcons.FileTypes.JavaClass,
+                                            labelFont = { it.deriveFont(Font.BOLD) },
+                                            model = model,
+                                            renderer = @Suppress("UnstableApiUsage") listCellRenderer {
+                                                text(value) {
+                                                    font = MonospacedFont
+                                                }
+                                            },
+                                        )
+                                    }
+
+                                    var placeholder: JLabel? = null
+                                    row { placeholder = grayed("Loading analyzed classes...").component }
+
+                                    loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
+                                        ApplicationManager.getApplication().invokeLater {
+                                            if (names.isEmpty()) {
+                                                placeholder?.text = "No analyzed classes found"
+                                                list?.isVisible = false
+                                            } else {
+                                                placeholder?.isVisible = false
+                                                model.clear()
+                                                names.sorted().forEach { model.addElement(it) }
+                                                list?.isVisible = true
+                                            }
+                                            component.revalidate()
+                                            component.repaint()
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            addRoot(mainPanel { GridBagLayout() }).apply {
+                                val label = GrayedLabel("Analysis for classes in a jar is disabled.")
+
+                                val actionLink = ActionLink("Open Settings") {
+                                    KotlinPluginsConfigurable.showGeneral(project)
+                                }
+
+                                vertical(label, actionLink)
+                            }
+                        }
+                    }
+
+                    is ArtifactStatus.FailedToLoad -> {
+                        val sanitizedMessage = project.service<KotlinPluginsStorage>()
+                            .getFailureMessageFor(plugin, mavenId, version)
+                            ?: "Failed to load with unknown reason. <br/>Please check the log for details."
+
+                        addRootPanel(
+                            customiseComponent = {
+                                it.maximumSize.width = 600
+                                it.minimumSize.width = 270
+                                it.preferredSize.width = 600
+                                it.preferredSize.height = 270
+                            }
+                        ) {
+                            var area: Cell<JBTextArea>? = null
+                            row {
+                                area = textArea()
+                                    .label("Failed to load this jar:", LabelPosition.TOP)
+                                    .align(AlignX.FILL)
+                                    .rows(10)
+                                    .applyToComponent {
+                                        text = sanitizedMessage
+                                        isEditable = false
+                                        wrapStyleWord = true
+                                        lineWrap = state.softWrapErrorMessages
+                                    }
+                            }
+
+                            row {
+                                checkBox("Soft wrap").applyToComponent {
+                                    addActionListener {
+                                        state.softWrapErrorMessages = isSelected
+                                        area?.component?.lineWrap = isSelected
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        component.removeAll()
+        component.add(parentPanel, BorderLayout.CENTER)
+        component.revalidate()
+        component.repaint()
+    }
+
+    private fun Row.grayed(@NlsContexts.Label text: String) = label(text).applyToComponent {
+        foreground = JBUI.CurrentTheme.Label.disabledForeground()
+    }
+
+    @Suppress("FunctionName")
+    private fun GrayedLabel(@NlsContexts.Label text: String) = JBLabel(text).apply {
+        foreground = JBUI.CurrentTheme.Label.disabledForeground()
+    }
+
+    private fun JLabel.align(alignment: Int): JLabel {
+        horizontalAlignment = alignment
+        return this
+    }
+
+    private fun openCacheLink(
+        isFile: Boolean,
+        plugin: String,
+        mavenId: String? = null,
+        version: String? = null,
+    ): ActionLink {
+        return if (isFile) {
+            ActionLink("Show in cache directory") { revealFor(plugin, mavenId, version) }
+        } else {
+            ActionLink("Show cache directory") { revealFor(plugin, mavenId, version) }
+        }.apply {
+            icon = AllIcons.General.OpenDisk
+        }
+    }
+
+    private fun header(
+        type: NodeType,
+        status: ArtifactStatus?,
+        plugin: String,
+        mavenId: String? = null,
+        version: String? = null,
+    ): JComponent {
+        return JPanel(BorderLayout()).apply {
+            val insets = JBUI.CurrentTheme.Toolbar.horizontalToolbarInsets() ?: JBUI.insets(5, 7)
+            border = BorderFactory.createEmptyBorder(insets.top, insets.left, insets.bottom, insets.right)
+            background = JBUI.CurrentTheme.ToolWindow.headerBackground()
+
+            status?.let {
+                val label = JBLabel(statusToTooltip(type, status)).apply {
+                    icon = statusToIcon(status)
+                }
+                add(label, BorderLayout.LINE_START)
+            }
+
+            if (status != null && (status is ArtifactStatus.Success || status is ArtifactStatus.ExceptionInRuntime)) {
+                add(Box.createRigidArea(JBUI.size(8, 0)), BorderLayout.CENTER)
+
+                add(openCacheLink(type == NodeType.Version, plugin, mavenId, version), BorderLayout.LINE_END)
+            }
+        }
+    }
+
+    private fun mainPanel(layoutGetter: (JComponent) -> LayoutManager = { BorderLayout() }): JPanel {
+        return JPanel().apply {
+            layout = layoutGetter(this)
+            border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        }
+    }
+
+    private fun pluginVersionPanels(
+        type: NodeType,
+        status: ArtifactStatus?,
+        pluginName: String,
+    ): JPanel {
+        return when (status) {
+            ArtifactStatus.InProgress -> inProgressPanel(type)
+            ArtifactStatus.Disabled -> disabledPanel(type, pluginName)
+            ArtifactStatus.Skipped -> skippedPanel(type)
+            else -> selectVersionPanel()
+        }
+    }
+
+    private fun selectVersionPanel(): JPanel {
+        return mainPanel { GridBagLayout() }.apply {
+            val grayedLabel = GrayedLabel("Select a version to see details.")
+
+            vertical(grayedLabel)
+        }
+    }
+
+    private fun inProgressPanel(type: NodeType): JPanel {
+        return mainPanel { GridBagLayout() }.apply {
+            val text = GrayedLabel("Panel will display info when ${type.displayLowerCaseName} is loaded.")
+
+            vertical(text)
+        }
+    }
+
+    private fun skippedPanel(type: NodeType): JPanel {
+        return mainPanel { GridBagLayout() }.apply {
+            val text = GrayedLabel("This ${type.displayLowerCaseName} is not yet requested in project.")
+            val description = GrayedLabel("Resolution is lazy and it might be requested later.")
+
+            vertical(text, description)
+        }
+    }
+
+    private fun disabledPanel(type: NodeType, pluginName: String): JPanel {
+        return mainPanel { GridBagLayout() }.apply {
+            val enableLink = ActionLink("Enable this ${type.displayLowerCaseName}") {
+                project.service<KotlinPluginsSettings>().enablePlugin(pluginName)
+            }
+
+            val orLabel = GrayedLabel("Or")
+
+            val settingsLink = ActionLink("Open the Settings") {
+                KotlinPluginsConfigurable.showArtifacts(project)
+            }
+
+            vertical(enableLink, orLabel, settingsLink)
+        }
+    }
+
+    private fun JPanel.vertical(
+        vararg components: JComponent,
+    ) {
+        val gbc = GridBagConstraints()
+
+        components.forEachIndexed { i, component ->
+            gbc.gridx = 0 // Column 0
+            gbc.gridy = i // Row i
+            if (i != components.lastIndex) {
+                gbc.insets.bottom = 7
+            }
+            this.add(component, gbc)
+        }
+    }
+
+    @Suppress("unused")
+    private fun JPanel.horizontal(
+        vararg components: JComponent,
+        @Suppress("SameParameterValue")
+        rightInset: Int = 5,
+    ) {
+        val gbc = GridBagConstraints()
+
+        components.forEachIndexed { i, component ->
+            gbc.gridx = i // Column i
+            gbc.gridy = 0 // Row 0
+            if (i != components.lastIndex) {
+                gbc.insets.right = rightInset
+            }
+            this.add(component, gbc)
+        }
+    }
+
+    private fun loadFqNamesAsync(jarId: JarId, onReady: (Set<String>) -> Unit) {
+        val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
+        if (!analyzer.state.enabled) {
+            return
+        }
+
+        project.service<KotlinPluginTreeStateService>().treeScope.launch(CoroutineName("load-fqnames-$jarId")) {
+            val map = project.service<KotlinPluginsExceptionReporter>().lookFor()
+            val names = map[jarId].orEmpty()
+            onReady(names)
+        }
+    }
+
+    private fun revealFor(plugin: String, mavenId: String? = null, version: String? = null) {
+        val storage = project.service<KotlinPluginsStorage>()
+        val path = storage.getLocationFor(plugin, mavenId, version)
+        if (path != null) {
+            runCatching {
+                if (path.isDirectory()) {
+                    RevealFileAction.openDirectory(path)
+                } else {
+                    RevealFileAction.openFile(path)
+                }
+            }
+        }
+    }
+
+    private fun exceptionTextAndHighlights(ex: Throwable, highlights: Set<String>): Pair<String, List<IntRange>> {
+        val raw = ex.stackTraceToString()
+        val lines = raw.split("\r\n", "\n")
+        val limit = lines.size.coerceAtMost(MAX_STACKTRACE_LINES)
+        val sb = StringBuilder()
+        val ranges = mutableListOf<IntRange>()
+        var offset = 0
+        for (i in 0 until limit) {
+            val line = lines[i]
+            val shouldHighlight = if (line.startsWith("\tat ")) {
+                val body = line.removePrefix("\tat ")
+                val classPart = body.substringBefore('(').substringBeforeLast('.')
+                highlights.contains(classPart)
+            } else false
+            val toAppend = line + "\n"
+            if (shouldHighlight) {
+                ranges.add(offset until (offset + line.length))
+            }
+            sb.append(toAppend)
+            offset += toAppend.length
+        }
+        if (lines.size > limit) {
+            val footer = "… truncated ${lines.size - limit} more lines\n"
+            sb.append(footer)
+        }
+        return sb.toString() to ranges
+    }
+
+    private fun createExceptionEditor(text: String, highlightRanges: List<IntRange>): EditorTextField {
+        return object : EditorTextField(text, project, null) {
+            override fun createEditor(): EditorEx {
+                val ed = super.createEditor()
+                ed.isViewer = true
+                ed.settings.isLineNumbersShown = true
+                ed.settings.isFoldingOutlineShown = false
+                ed.settings.isCaretRowShown = false
+                ed.settings.isUseSoftWraps = true
+                ed.settings.isWhitespacesShown = false
+                applyHighlights(ed, highlightRanges)
+                return ed
+            }
+        }.apply {
+            minimumSize = Dimension(270, 55)
+        }
+    }
+
+    private fun applyHighlights(editor: com.intellij.openapi.editor.Editor, highlightRanges: List<IntRange>) {
+        val markup = editor.markupModel
+        markup.removeAllHighlighters()
+        val attrs = TextAttributes(
+            /* foregroundColor = */ null,
+            /* backgroundColor = */ JBUI.CurrentTheme.Editor.Tooltip.SUCCESS_BACKGROUND,
+            /* effectColor = */ null,
+            /* effectType = */ null,
+            /* fontType = */ Font.PLAIN,
+        )
+        highlightRanges.forEach { range ->
+            markup.addRangeHighlighter(
+                range.first,
+                range.last + 1,
+                HighlighterLayer.SELECTION - 1,
+                attrs,
+                HighlighterTargetArea.EXACT_RANGE
+            )
+        }
+    }
+
+    private fun updateExceptionEditor(editorField: EditorTextField, ex: Throwable, fqNames: Set<String>) {
+        val (text, ranges) = exceptionTextAndHighlights(ex, fqNames)
+        editorField.text = text
+        editorField.editor?.let { ed ->
+            applyHighlights(ed, ranges)
+        }
+    }
+
+    companion object {
+        private const val MAX_STACKTRACE_LINES = 100
+    }
+
+    override fun dispose() {
+        state.removeOnSelectedState(::render)
+    }
+
+    private fun setEllipsized(component: JComponent, font: Font, full: String, setText: (String) -> Unit) {
+        val insets = component.insets
+        val max = component.width - insets.left - insets.right
+        if (max <= 0) {
+            setText(full)
+            return
+        }
+
+        val fm = component.getFontMetrics(font)
+        if (fm.stringWidth(full) <= max) {
+            setText(full)
+            return
+        }
+
+        val ellipsis = "\u2026"
+        var lo = 0
+        var hi = full.length
+        while (lo < hi) {
+            val mid = (lo + hi + 1) ushr 1
+            val candidate = full.take(mid) + ellipsis
+            if (fm.stringWidth(candidate) <= max) {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+
+        setText(full.take(lo) + ellipsis)
+    }
+
+    private val labelFont = JBLabel().font
+}
+
 private class NodeData(
     project: Project,
     val parent: NodeData?,
@@ -268,16 +1052,39 @@ private class NodeData(
     }
 }
 
-class TreeState : BaseState() {
+class KotlinPluginsTreeState : BaseState() {
     var showSucceeded: Boolean by property(true)
     var showSkipped: Boolean by property(true)
 
     var selectedNodeKey: String? by string(null)
 
     var showClearCachesDialog: Boolean by property(true)
+    var softWrapErrorMessages: Boolean by property(false)
 
     companion object {
-        fun getInstance(project: Project): TreeState = project.service<KotlinPluginTreeStateService>().state
+        fun getInstance(project: Project): KotlinPluginsTreeState =
+            project.service<KotlinPluginTreeStateService>().state
+    }
+
+    fun select(pluginName: String? = null, mavenId: String? = null, version: String? = null) {
+        if (pluginName == null) {
+            selectedNodeKey = null
+            return
+        }
+
+        val key = nodeKey(pluginName, mavenId, version)
+        selectedNodeKey = key
+    }
+
+    private val actions = mutableListOf<() -> Unit>()
+
+    fun onSelectedState(action: () -> Unit): () -> Unit {
+        actions.add(action)
+        return action
+    }
+
+    fun removeOnSelectedState(action: () -> Unit) {
+        actions.remove(action)
     }
 }
 
@@ -288,13 +1095,15 @@ class TreeState : BaseState() {
 )
 class KotlinPluginTreeStateService(
     val treeScope: CoroutineScope,
-) : SimplePersistentStateComponent<TreeState>(TreeState())
+) : SimplePersistentStateComponent<KotlinPluginsTreeState>(KotlinPluginsTreeState())
 
 class KotlinPluginsTree(
     private val project: Project,
-    val state: TreeState,
+    val state: KotlinPluginsTreeState,
     val settings: KotlinPluginsSettings,
 ) : Tree(), Disposable {
+    internal var overviewPanel: OverviewPanel? = null
+
     private val rootNode = DefaultMutableTreeNode(
         NodeData(
             project = project,
@@ -309,6 +1118,15 @@ class KotlinPluginsTree(
     private val model = DefaultTreeModel(rootNode)
 
     private val nodesByKey: MutableMap<String, DefaultMutableTreeNode> = mutableMapOf()
+
+    fun statusForKey(key: String?): ArtifactStatus? {
+        if (key == null) {
+            return null
+        }
+
+        return nodesByKey[key]?.data?.status?.takeIf { shouldIncludeStatus(it) }
+    }
+
     private val connection = project.messageBus.connect()
 
     private val updaters = Channel<() -> Unit>(Channel.UNLIMITED)
@@ -340,20 +1158,31 @@ class KotlinPluginsTree(
         updater.reset()
 
         connection.subscribe(KotlinPluginStatusUpdater.TOPIC, updater)
+        selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
+    }
+
+    private fun TreeNode?.selectionPath(): List<TreeNode> {
+        if (this == null) {
+            return emptyList()
+        }
+
+        return this.parent.selectionPath() + this
     }
 
     private fun reset() {
-        nodesByKey.clear()
+        nodesByKey.values.removeIf { it.data.status !is ArtifactStatus.ExceptionInRuntime }
+
         redrawModel()
         project.service<KotlinPluginsStorage>().requestStatuses()
     }
 
     private fun redrawModel() {
-        state.selectedNodeKey = null
-
         rootNode.removeAllChildren()
 
         val plugins = settings.safeState().plugins
+
+        val selectedNodeKey = state.selectedNodeKey
+        var selectedNode: DefaultMutableTreeNode? = null
 
         for (plugin in plugins) {
             val rootData = rootNode.userObject as NodeData
@@ -379,6 +1208,9 @@ class KotlinPluginsTree(
                 }.map { (k, v) ->
                     val versionNode = DefaultMutableTreeNode(v.data)
                     nodesByKey[k] = versionNode
+                    if (k == selectedNodeKey) {
+                        selectedNode = versionNode
+                    }
                     versionNode
                 }
 
@@ -403,6 +1235,10 @@ class KotlinPluginsTree(
                 if (shouldIncludeStatus(artifactStatus)) {
                     pluginNode.add(artifactNode)
                     versionNodes.forEach { artifactNode.add(it) }
+
+                    if (artifactKey == selectedNodeKey) {
+                        selectedNode = artifactNode
+                    }
                 }
 
                 nodesByKey[artifactKey] = artifactNode
@@ -420,6 +1256,9 @@ class KotlinPluginsTree(
             // include a plugin if it passes filter (by its own status) or has any children
             if (shouldIncludeStatus(pluginStatus) || pluginNode.childCount > 0) {
                 rootNode.add(pluginNode)
+                if (pluginKey == selectedNodeKey) {
+                    selectedNode = pluginNode
+                }
             }
 
             nodesByKey[pluginKey] = pluginNode
@@ -433,7 +1272,19 @@ class KotlinPluginsTree(
             criteria = KotlinPluginDescriptor.VersionMatching.EXACT,
         )
 
+        if (selectedNodeKey != null && selectedNodeKey !in nodesByKey.keys) {
+            state.selectedNodeKey = null
+        }
+
         model.reload()
+
+        if (selectedNode != null) {
+            val path = selectedNode.selectionPath()
+            if (path.isNotEmpty()) {
+                selectionPath = TreePath(path.toTypedArray())
+            }
+        }
+
         repaint()
     }
 
@@ -466,6 +1317,8 @@ class KotlinPluginsTree(
             status: ArtifactStatus,
         ) = updateUi {
             this@KotlinPluginsTree.updateArtifact(pluginName, mavenId, status)
+
+            overviewPanel?.updater?.updateArtifact(pluginName, mavenId, status)
         }
 
         override fun updateVersion(
@@ -475,18 +1328,24 @@ class KotlinPluginsTree(
             status: ArtifactStatus,
         ) = updateUi {
             this@KotlinPluginsTree.updateVersion(pluginName, mavenId, version, status)
+
+            overviewPanel?.updater?.updateVersion(pluginName, mavenId, version, status)
         }
 
         override fun reset() = updateUi {
             this@KotlinPluginsTree.reset()
 
             expandAll()
+
+            overviewPanel?.updater?.reset()
         }
 
         override fun redraw() = updateUi {
             this@KotlinPluginsTree.redrawModel()
 
             expandAll()
+
+            overviewPanel?.updater?.redraw()
         }
     }
 
@@ -516,6 +1375,7 @@ class KotlinPluginsTree(
             }
     }
 
+    // todo update logic for exceptions
     private fun updatePlugin(pluginName: String, status: ArtifactStatus) {
         val key = nodeKey(pluginName)
 
@@ -617,7 +1477,7 @@ class KotlinPluginsTree(
     }
 }
 
-fun nodeKey(pluginName: String, mavenId: String? = null, version: String? = null): String {
+private fun nodeKey(pluginName: String, mavenId: String? = null, version: String? = null): String {
     if (mavenId == null && version != null) {
         error("MavenId is null, but version is not null, $version, $pluginName")
     }
@@ -677,13 +1537,13 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
                 "<html>Version loaded successfully. <br/>" +
                         "Requested ${status.requestedVersion}, " +
                         "actual is ${status.actualVersion}, " +
-                        "criteria: ${status.criteria}"
+                        "criteria: ${status.criteria}</html>"
             }
         }
 
         ArtifactStatus.InProgress -> "Version is loading/refreshing"
-        is ArtifactStatus.FailedToLoad -> "Version failed to load: ${status.shortMessage} (click for more details)"
-        ArtifactStatus.ExceptionInRuntime -> "Version threw an exception during runtime (click for more details)"
+        is ArtifactStatus.FailedToLoad -> "Version failed to load: ${status.shortMessage}"
+        ArtifactStatus.ExceptionInRuntime -> "Version threw an exception during runtime"
         ArtifactStatus.Disabled -> "Version is disabled in settings"
         ArtifactStatus.Skipped -> "Version is not requested in the project yet"
     }
@@ -720,3 +1580,49 @@ private fun KotlinPluginDescriptor.VersionMatching.toUi(): String {
         KotlinPluginDescriptor.VersionMatching.LATEST -> "Latest"
     }
 }
+
+private fun <T> Row.jbList(
+    label: @NlsContexts.Label String?,
+    icon: Icon? = null,
+    labelFont: (Font) -> Font = { it },
+    model: DefaultListModel<T>,
+    renderer: ListCellRenderer<T>,
+    patchList: Consumer<JBList<T>>? = null,
+): JBList<T?> {
+    val list = JBList(model)
+    list.border = JBUI.Borders.customLine(JBUI.CurrentTheme.MainWindow.Tab.BORDER, 1)
+    list.setCellRenderer(renderer)
+    patchList?.accept(list)
+
+    val result = cell(list).apply {
+        align(AlignX.FILL)
+    }
+    label?.let {
+        val labelComponent = JBLabel(label).apply {
+            font = labelFont(font)
+            if (icon != null) {
+                this.icon = icon
+            }
+        }
+
+        result.label(labelComponent, LabelPosition.TOP)
+    }
+    return list
+}
+
+private val MonospacedFont by lazy {
+    val attributes = mutableMapOf<TextAttribute, Any?>()
+
+    attributes[TextAttribute.FAMILY] = "Monospaced"
+    attributes[TextAttribute.WEIGHT] = TextAttribute.WEIGHT_REGULAR
+    attributes[TextAttribute.WIDTH] = TextAttribute.WIDTH_REGULAR
+
+    JBFont.create(Font.getFont(attributes)).deriveFont(Font.PLAIN, 13.0f)
+}
+
+private val NodeType.displayLowerCaseName
+    get() = when (this) {
+        NodeType.Plugin -> "plugin"
+        NodeType.Artifact -> "artifact"
+        NodeType.Version -> "version"
+    }

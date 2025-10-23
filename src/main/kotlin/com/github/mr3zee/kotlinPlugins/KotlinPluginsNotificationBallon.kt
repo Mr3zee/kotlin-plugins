@@ -10,6 +10,8 @@ object KotlinPluginsNotificationBallon {
     fun notify(
         project: Project,
         disabledPlugin: String,
+        mavenId: String?,
+        version: String?,
     ) {
         NotificationGroupManager.getInstance()
             .getNotificationGroup("Kotlin External FIR Support")
@@ -24,7 +26,13 @@ object KotlinPluginsNotificationBallon {
                     e: AnActionEvent,
                     notification: Notification,
                 ) {
-                    e.project?.let { KotlinPluginsToolWindowFactory.show(it) }
+                    e.project?.let {
+                        KotlinPluginsTreeState
+                            .getInstance(it)
+                            .select(disabledPlugin, mavenId, version)
+
+                        KotlinPluginsToolWindowFactory.show(it)
+                    }
                     notification.expire()
                 }
             })

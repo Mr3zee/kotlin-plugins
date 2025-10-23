@@ -1,7 +1,6 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -13,7 +12,7 @@ import javax.swing.JComponent
 open class KotlinPluginsClearCachesAction : AnAction(AllIcons.Actions.ClearCash) {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val treeState = TreeState.getInstance(project)
+        val treeState = KotlinPluginsTreeState.getInstance(project)
 
         val clear = !treeState.showClearCachesDialog || run {
             val (clear, dontShowAgain) = ClearCachesDialog.show()

@@ -71,7 +71,14 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
             }
 
             panel.createActionLabel("Open diagnostics") {
-                // todo update state to show error panel
+                val pluginOrNull = grouped.keys.singleOrNull()
+
+                val jarIdOrNull = pluginOrNull?.let { grouped[it]?.singleOrNull() }
+                val mavenIdOrNull = jarIdOrNull?.mavenId
+                val versionOrNull = jarIdOrNull?.version
+
+                KotlinPluginsTreeState.getInstance(project)
+                    .select(pluginOrNull, mavenIdOrNull, versionOrNull)
 
                 KotlinPluginsToolWindowFactory.show(project)
             }

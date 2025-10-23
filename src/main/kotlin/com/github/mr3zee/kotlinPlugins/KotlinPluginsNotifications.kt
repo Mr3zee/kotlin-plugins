@@ -9,17 +9,17 @@ import com.intellij.openapi.components.Service
 @Service(Service.Level.PROJECT)
 internal class KotlinPluginsNotifications {
     @Volatile
-    private var activePlugins: Set<VersionedPluginKey> = emptySet()
+    private var activePlugins: Set<JarId> = emptySet()
 
-    fun activate(pluginName: String, versions: List<String>) {
+    fun activate(ids: List<JarId>) {
         synchronized(this) {
-            activePlugins = activePlugins + versions.map { VersionedPluginKey(pluginName, it) }
+            activePlugins = activePlugins + ids
         }
     }
 
-    fun deactivate(pluginName: String, version: String) {
+    fun deactivate(pluginName: String, mavenId: String, version: String) {
         synchronized(this) {
-            activePlugins = activePlugins - VersionedPluginKey(pluginName, version)
+            activePlugins = activePlugins - JarId(pluginName, mavenId, version)
         }
     }
 
@@ -27,5 +27,5 @@ internal class KotlinPluginsNotifications {
         synchronized(this) { activePlugins = emptySet() }
     }
 
-    fun currentPlugins(): Set<VersionedPluginKey> = activePlugins
+    fun currentPlugins(): Set<JarId> = activePlugins
 }

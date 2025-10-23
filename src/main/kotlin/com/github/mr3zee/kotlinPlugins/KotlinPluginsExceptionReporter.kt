@@ -30,10 +30,24 @@ interface KotlinPluginsExceptionReporter {
 
     suspend fun lookFor(): Map<JarId, Set<String>>
 
-    fun matched(ids: List<JarId>, exception: Throwable, autoDisable: Boolean)
+    fun matched(ids: List<JarId>, exception: Throwable, autoDisable: Boolean, isProbablyIncompatible: Boolean)
 
     fun hasExceptions(pluginName: String, mavenId: String, version: String): Boolean
+
+    fun getExceptionsReport(pluginName: String, mavenId: String, version: String): ExceptionsReport?
 }
+
+class ExceptionsReport(
+    // The jar is from a local repo
+    val isLocal: Boolean,
+    // The jar reloaded after to the same one exception occurred
+    val reloadedSame: Boolean,
+    // Exceptions that occurred point to the binary incompatibility
+    val isProbablyIncompatible: Boolean,
+    // The Kotlin version of the jar is different from the Kotlin version in the IDE
+    val kotlinVersionMismatch: KotlinVersionMismatch?,
+    val exceptions: List<Throwable>,
+)
 
 class KotlinPluginsExceptionReporterImpl(
     val project: Project,
@@ -82,10 +96,27 @@ class KotlinPluginsExceptionReporterImpl(
     private val state = AtomicReference<State?>(null)
 
     private val stackTraceMap = ConcurrentHashMap<JarId, Set<String>>()
+    private val metadata = ConcurrentHashMap<JarId, JarMetadata>()
+
+    private val caughtExceptions = ConcurrentHashMap<String, List<CaughtException>>()
+
+    private class CaughtException(
+        val jarId: JarId,
+        val exception: Throwable,
+    )
+
+    private data class JarMetadata(
+        val checksum: String,
+        val isLocal: Boolean,
+        val kotlinVersionMismatch: KotlinVersionMismatch?,
+        val reloadedSame: Boolean,
+        val isProbablyIncompatible: Boolean,
+    )
 
     override fun dispose() {
         state.getAndSet(null)?.close()
         stackTraceMap.clear()
+        metadata.clear()
     }
 
     override fun start() {
@@ -100,6 +131,11 @@ class KotlinPluginsExceptionReporterImpl(
     override fun stop() {
         state.getAndSet(null)?.close()
         stackTraceMap.clear()
+        caughtExceptions.clear()
+        metadata.clear()
+
+        project.service<KotlinPluginsNotifications>().clear()
+        refreshNotifications()
     }
 
     private fun initializationState() = scope.launch(
@@ -121,10 +157,42 @@ class KotlinPluginsExceptionReporterImpl(
 
     private fun processChunk(chunk: List<KotlinPluginDiscoveryUpdater.Discovery>) {
         chunk.forEach { discovery ->
+            val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
+
+            metadata.compute(jarId) { _, old ->
+                computeMetadata(old, discovery)
+            }
+
             processDiscovery(discovery)
         }
 
         logger.debug("Finished processing chunk of ${chunk.size} jars: ${chunk.map { "${it.pluginName} (${it.mavenId})" }}")
+    }
+
+    private fun computeMetadata(
+        old: JarMetadata?,
+        discovery: KotlinPluginDiscoveryUpdater.Discovery,
+        ifNew: () -> Unit = {},
+    ): JarMetadata? {
+        // the same checksum -> the same exception will be thrown eventually
+        return if (old == null || old.checksum != discovery.checksum) {
+            ifNew()
+            JarMetadata(
+                checksum = discovery.checksum,
+                isLocal = discovery.isLocal,
+                kotlinVersionMismatch = discovery.kotlinVersionMismatch,
+                reloadedSame = false,
+                isProbablyIncompatible = false,
+            )
+        } else {
+            JarMetadata(
+                checksum = discovery.checksum,
+                isLocal = discovery.isLocal,
+                kotlinVersionMismatch = discovery.kotlinVersionMismatch,
+                reloadedSame = true,
+                isProbablyIncompatible = old.isProbablyIncompatible,
+            )
+        }
     }
 
     private fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
@@ -155,18 +223,16 @@ class KotlinPluginsExceptionReporterImpl(
         return stackTraceMap.toMap()
     }
 
-    private val caughtExceptions = mutableMapOf<String, List<CaughtException>>()
-
-    private class CaughtException(
-        val jarId: JarId,
-        val exception: Throwable,
-    )
-
-    override fun matched(ids: List<JarId>, exception: Throwable, autoDisable: Boolean) {
+    override fun matched(
+        ids: List<JarId>,
+        exception: Throwable,
+        autoDisable: Boolean,
+        isProbablyIncompatible: Boolean,
+    ) {
         val settings = project.service<KotlinPluginsSettings>()
 
         ids.groupBy { it.pluginName }.forEach { (pluginName, ids) ->
-            matched(settings, pluginName, ids, exception, autoDisable)
+            matched(settings, pluginName, ids, exception, autoDisable, isProbablyIncompatible)
         }
     }
 
@@ -176,6 +242,7 @@ class KotlinPluginsExceptionReporterImpl(
         ids: List<JarId>,
         exception: Throwable,
         autoDisable: Boolean,
+        isProbablyIncompatible: Boolean,
     ) {
         val plugin = settings.pluginByName(pluginName) ?: return
 
@@ -188,6 +255,10 @@ class KotlinPluginsExceptionReporterImpl(
         }
 
         ids.forEach { id ->
+            metadata.compute(id) { _, old ->
+                old?.copy(isProbablyIncompatible = isProbablyIncompatible)
+            }
+
             statusPublisher.updateVersion(id.pluginName, id.mavenId, id.version, ArtifactStatus.ExceptionInRuntime)
         }
 
@@ -196,12 +267,17 @@ class KotlinPluginsExceptionReporterImpl(
         }
 
         if (autoDisable) {
-            settings.disablePlugins(plugin.name)
+            settings.disablePlugin(plugin.name)
 
-            KotlinPluginsNotificationBallon.notify(project, disabledPlugin = plugin.name)
+            KotlinPluginsNotificationBallon.notify(
+                project = project,
+                disabledPlugin = plugin.name,
+                mavenId = ids.singleOrNull()?.mavenId,
+                version = ids.singleOrNull()?.version,
+            )
         } else {
             // trigger editor notification across all Kotlin files
-            project.service<KotlinPluginsNotifications>().activate(plugin.name, ids.map { it.version })
+            project.service<KotlinPluginsNotifications>().activate(ids)
             refreshNotifications()
         }
     }
@@ -210,25 +286,85 @@ class KotlinPluginsExceptionReporterImpl(
         return caughtExceptions[pluginName].orEmpty().any { it.jarId.mavenId == mavenId && it.jarId.version == version }
     }
 
+    override fun getExceptionsReport(pluginName: String, mavenId: String, version: String): ExceptionsReport? {
+        val jarId = JarId(pluginName, mavenId, version)
+        val lookup = stackTraceMap[jarId].orEmpty()
+
+        val list = caughtExceptions[pluginName].orEmpty()
+            .filter { it.jarId.mavenId == mavenId && it.jarId.version == version }
+            .map { it.exception }
+        // Deduplicate by exception "signature": class + message + full stacktrace
+        val exceptions = list.distinctBy { ex ->
+            buildString {
+                append(ex::class.java.name)
+                append('|')
+                append(ex.message ?: "")
+                append('|')
+                append(ex.distinctStacktrace(lookup))
+            }
+        }
+
+        return if (exceptions.isEmpty()) {
+            null
+        } else {
+            val metadata = metadata[JarId(pluginName, mavenId, version)] ?: return null
+
+            ExceptionsReport(
+                exceptions = exceptions,
+                isLocal = metadata.isLocal,
+                reloadedSame = metadata.reloadedSame,
+                isProbablyIncompatible = metadata.isProbablyIncompatible,
+                kotlinVersionMismatch = metadata.kotlinVersionMismatch,
+            )
+        }
+    }
+
+    private fun Throwable.distinctStacktrace(lookup: Set<String>): String {
+        return stackTrace.filter { it.className in lookup }.joinToString("|") { it.toString() } +
+                "|" +
+                cause?.distinctStacktrace(lookup).orEmpty()
+    }
+
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
         override fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
-            caughtExceptions.compute(discovery.pluginName) { _, old ->
-                old.orEmpty().filterNot {
-                    it.jarId.mavenId == discovery.mavenId && it.jarId.version == discovery.version
+            val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
+
+            var new = false
+            metadata.compute(jarId) { _, old ->
+                computeMetadata(old, discovery) {
+                    new = true
+                    caughtExceptions.compute(discovery.pluginName) { _, old ->
+                        old.orEmpty().filterNot {
+                            it.jarId == jarId
+                        }
+                    }
                 }
             }
 
-            project.service<KotlinPluginsNotifications>().deactivate(discovery.pluginName, discovery.version)
-            refreshNotifications()
+            if (new) {
+                project.service<KotlinPluginsNotifications>()
+                    .deactivate(discovery.pluginName, discovery.mavenId, discovery.version)
 
-            processDiscovery(discovery)
+                refreshNotifications()
+
+                processDiscovery(discovery)
+            }
         }
 
         override fun reset() {
             state.getAndSet(null)?.close()
             stackTraceMap.clear()
-            caughtExceptions.clear()
         }
+    }
+
+    fun clearAll() {
+        state.getAndSet(null)?.close()
+        stackTraceMap.clear()
+        caughtExceptions.clear()
+        metadata.clear()
+
+        project.service<KotlinPluginsNotifications>().clear()
+        refreshNotifications()
     }
 
     private fun refreshNotifications() {

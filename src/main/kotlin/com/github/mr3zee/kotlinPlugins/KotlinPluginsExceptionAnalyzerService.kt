@@ -40,10 +40,11 @@ class KotlinPluginsExceptionAnalyzerService(
     Disposable {
     private val logger by lazy { thisLogger() }
     private val handler: AtomicReference<Handler?> = AtomicReference(null)
-    val supervisorJob = SupervisorJob(scope.coroutineContext.job)
+    private val supervisorJob = scope.coroutineContext + SupervisorJob(scope.coroutineContext.job)
+    private val publisherSync by lazy { project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC) }
 
     override fun dispose() {
-        supervisorJob.cancel()
+        supervisorJob.job.cancel()
         val handler = handler.getAndSet(null)
         rootLogger().removeHandler(handler)
         handler?.close()
@@ -59,6 +60,7 @@ class KotlinPluginsExceptionAnalyzerService(
             }
 
             project.service<KotlinPluginsExceptionReporter>().start()
+            publisherSync.redraw()
             exceptionHandler.start()
             logger.debug("Exception analyzer started")
             rootLogger().addHandler(exceptionHandler)
@@ -79,15 +81,27 @@ class KotlinPluginsExceptionAnalyzerService(
                 val lookup = reporter.lookFor()
 
                 lookup.entries.find { (jarId, fqNames) ->
-                    exception.stackTrace.any { it.className in fqNames }
+                    var curr: Throwable? = exception
+                    while (curr != null) {
+                        if (curr.stackTrace.any { it.className in fqNames }) {
+                            return@find true
+                        }
+
+                        curr = curr.cause
+                    }
+                    false
                 } ?: continue
 
-                val ids = match(lookup, exception)
-                    .takeIf { it.isNotEmpty() }
-                    ?: return@launch
+                val ids = match(lookup, exception) ?: continue
 
                 logger.debug("Exception detected for $ids: ${exception.message}")
-                reporter.matched(ids.toList(), exception, autoDisable = state.autoDisable)
+
+                reporter.matched(
+                    ids = ids.toList(),
+                    exception = exception,
+                    autoDisable = state.autoDisable,
+                    isProbablyIncompatible = exception.isProbablyIncompatible(),
+                )
             }
         }
 
@@ -141,7 +155,7 @@ class KotlinPluginsExceptionAnalyzerService(
     }
 
     companion object {
-        internal fun match(lookup: Map<JarId, Set<String>>, exception: Throwable): Set<JarId> {
+        internal fun match(lookup: Map<JarId, Set<String>>, exception: Throwable): Set<JarId>? {
             return exception.stackTrace
                 .map { trace ->
                     lookup.entries
@@ -149,7 +163,18 @@ class KotlinPluginsExceptionAnalyzerService(
                         .map { it.key }.toSet()
                 }
                 .filter { it.isNotEmpty() }
-                .reduce { acc, set -> acc.intersect(set) }
+                .takeIf { it.isNotEmpty() }
+                ?.reduce { acc, set -> acc.intersect(set) }
+                ?: match(lookup, exception.cause ?: return null)
+        }
+
+        private fun Throwable.isProbablyIncompatible(): Boolean {
+            return this is ClassNotFoundException ||
+                    this is NoClassDefFoundError ||
+                    this is IncompatibleClassChangeError ||
+                    this is LinkageError ||
+                    this is ClassCastException ||
+                    this.cause?.isProbablyIncompatible() == true
         }
     }
 }

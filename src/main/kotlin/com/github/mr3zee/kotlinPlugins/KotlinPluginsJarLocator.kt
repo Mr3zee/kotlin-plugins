@@ -66,6 +66,8 @@ sealed interface LocatorResult {
 class Jar(
     val path: Path,
     val checksum: String,
+    val isLocal: Boolean,
+    val kotlinVersionMismatch: KotlinVersionMismatch?,
 )
 
 internal object KotlinPluginsJarLocator {
@@ -105,7 +107,7 @@ internal object KotlinPluginsJarLocator {
         versioned: VersionedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
         dest: Path,
-        known: Map<MavenId, Jar>,
+        known: Map<String, Jar>,
     ): BundleResult {
         val logTag = "[${versioned.descriptor.name}:${logId.andIncrement}]"
 
@@ -115,10 +117,10 @@ internal object KotlinPluginsJarLocator {
             locatorResults = versioned.descriptor.ids.associateWith { mavenId ->
                 locateArtifact(
                     logTag = logTag,
-                    versioned = RequestedKotlinPluginDescriptor(versioned.descriptor, versioned.version, mavenId,),
+                    versioned = RequestedKotlinPluginDescriptor(versioned.descriptor, versioned.version, mavenId),
                     kotlinIdeVersion = kotlinIdeVersion,
                     dest = dest,
-                    known = known[mavenId],
+                    known = known[mavenId.id],
                 ).also {
                     val resultString = when (it) {
                         is LocatorResult.Cached -> "Cached"
@@ -392,7 +394,17 @@ internal object KotlinPluginsJarLocator {
             val finalFilename = jar.path.removeDownloadingExtension()
             Files.move(jar.path, finalFilename, StandardCopyOption.ATOMIC_MOVE)
 
-            LocatorResult.Cached(Jar(finalFilename, jar.checksum), filter, libVersion, original)
+            LocatorResult.Cached(
+                jar = Jar(
+                    path = finalFilename,
+                    checksum = jar.checksum,
+                    isLocal = jar.isLocal,
+                    kotlinVersionMismatch = jar.kotlinVersionMismatch,
+                ),
+                filter = filter,
+                libVersion = libVersion,
+                original = original,
+            )
         } else {
             this
         }
@@ -509,7 +521,7 @@ internal object KotlinPluginsJarLocator {
 
         return when (downloadResult) {
             is DownloadResult.Success -> LocatorResult.Cached(
-                jar = Jar(file, checksum),
+                jar = Jar(file, checksum, isLocal = false, kotlinVersionMismatch = null),
                 filter = filter,
                 libVersion = libVersion,
             )
@@ -573,7 +585,12 @@ internal object KotlinPluginsJarLocator {
             }
         }
 
-        return LocatorResult.Cached(Jar(file, checksum), filter, libVersion, jarPath)
+        return LocatorResult.Cached(
+            jar = Jar(path = file, checksum = checksum, isLocal = true, kotlinVersionMismatch = null),
+            filter = filter,
+            libVersion = libVersion,
+            original = jarPath
+        )
     }
 
     private suspend fun getChecksum(
@@ -619,14 +636,17 @@ internal object KotlinPluginsJarLocator {
                 url = url,
             )
 
-            val checksum = try {
-                temp.readBytes().asChecksum()
-            } catch (e: IOException) {
-                return ChecksumResult.FailedToFetch("Failed to read checksum file: ${e.message}")
-            }
-
             return when (downloadResult) {
-                is DownloadResult.Success -> ChecksumResult.Success(checksum)
+                is DownloadResult.Success -> {
+                    val checksum = try {
+                        temp.readText()
+                    } catch (e: IOException) {
+                        return ChecksumResult.FailedToFetch("Failed to read checksum file: ${e.message}")
+                    }
+
+                    ChecksumResult.Success(checksum)
+                }
+
                 is DownloadResult.NotFound -> ChecksumResult.NotFound
                 is DownloadResult.FailedToFetch -> ChecksumResult.FailedToFetch(downloadResult.message)
             }
@@ -649,20 +669,17 @@ internal object KotlinPluginsJarLocator {
                 return ChecksumResult.NotFound
             }
 
-            try {
-                val checksum = md5(originalFile)
-                    .asChecksum()
-
-                return ChecksumResult.Success(checksum)
+            return try {
+                ChecksumResult.Success(md5(originalFile).asChecksum())
             } catch (e: Exception) {
-                return ChecksumResult.FailedToFetch(
+                ChecksumResult.FailedToFetch(
                     "Failed to calculate the checksum for the $originalFile: ${e::class}: ${e.message}"
                 )
             }
         }
 
         return try {
-            ChecksumResult.Success(md5Path.readBytes().asChecksum())
+            ChecksumResult.Success(md5Path.readText())
         } catch (e: Exception) {
             ChecksumResult.FailedToFetch(
                 "Failed to read md5 file $md5Path: ${e::class}: ${e.message}"
@@ -682,6 +699,10 @@ internal object KotlinPluginsJarLocator {
         url: String,
     ): DownloadResult {
         val result = client.prepareGet(url).execute { httpResponse ->
+            val contentLength = httpResponse.contentLength()?.toDouble() ?: 0.0
+
+            logger.debug("$logTag Request URL: $url, status: ${httpResponse.status}, size: $contentLength")
+
             if (httpResponse.status == HttpStatusCode.NotFound) {
                 return@execute DownloadResult.NotFound
             }
@@ -693,14 +714,9 @@ internal object KotlinPluginsJarLocator {
                 )
             }
 
-            val requestUrl = httpResponse.request.url.toString()
-            val contentLength = httpResponse.contentLength()?.toDouble() ?: 0.0
-
-            logger.debug("$logTag Request URL: $url, size: $contentLength")
-
             if (contentLength == 0.0) {
                 return@execute DownloadResult.FailedToFetch(
-                    "Empty response body when downloading from $requestUrl"
+                    "Empty response body when downloading from $url"
                 )
             }
 
@@ -822,7 +838,7 @@ internal fun md5(originalFile: Path): ByteArray =
     MessageDigest.getInstance("MD5")
         .digest(originalFile.readBytes())
 
-internal fun ByteArray.asChecksum(): String = BigInteger(1, this).toString(16)
+internal fun ByteArray.asChecksum(): String = String.format("%032x", BigInteger(1, this))
 
 private const val DOWNLOADING_EXTENSION = "downloading"
 

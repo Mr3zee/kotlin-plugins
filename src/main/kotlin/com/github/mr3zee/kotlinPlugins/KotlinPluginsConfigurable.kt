@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.options.Configurable
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
@@ -51,7 +52,7 @@ private class LocalState {
 
     fun isModified(
         analyzer: KotlinPluginsExceptionAnalyzerState,
-        tree: TreeState,
+        tree: KotlinPluginsTreeState,
         settings: KotlinPluginsSettings.State,
     ): Boolean {
         return repositories != settings.repositories ||
@@ -64,7 +65,7 @@ private class LocalState {
 
     fun reset(
         analyzer: KotlinPluginsExceptionAnalyzerState,
-        tree: TreeState,
+        tree: KotlinPluginsTreeState,
         settings: KotlinPluginsSettings.State,
     ) {
         repositories.clear()
@@ -83,7 +84,7 @@ private class LocalState {
 
     fun applyTo(
         analyzer: KotlinPluginsExceptionAnalyzerService,
-        tree: TreeState,
+        tree: KotlinPluginsTreeState,
         settings: KotlinPluginsSettings,
     ) {
         val enabledPlugins = plugins.map {
@@ -101,6 +102,21 @@ private class LocalState {
 }
 
 class KotlinPluginsConfigurable(private val project: Project) : Configurable {
+    companion object {
+        @Volatile
+        private var selectArtifactsInitially: Boolean = false
+
+        fun showArtifacts(project: Project) {
+            selectArtifactsInitially = true
+            ShowSettingsUtil.getInstance().showSettingsDialog(project, KotlinPluginsConfigurable::class.java)
+        }
+
+        fun showGeneral(project: Project) {
+            selectArtifactsInitially = false
+            ShowSettingsUtil.getInstance().showSettingsDialog(project, KotlinPluginsConfigurable::class.java)
+        }
+    }
+
     private val local: LocalState = LocalState()
 
     private lateinit var repoTable: JBTable
@@ -303,6 +319,10 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         val tabs = JBTabbedPane()
         tabs.addTab("General", generalContent)
         tabs.addTab("Artifacts", artifactsContent)
+        if (selectArtifactsInitially) {
+            tabs.selectedIndex = 1
+            selectArtifactsInitially = false
+        }
         rootPanel = JPanel(BorderLayout()).apply { add(tabs, BorderLayout.NORTH) }
 
         reset() // initialise from a persisted state

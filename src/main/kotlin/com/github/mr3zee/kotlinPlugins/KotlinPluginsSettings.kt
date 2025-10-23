@@ -63,7 +63,22 @@ class KotlinPluginsSettings(
         return safeState().plugins.find { it.name == name }
     }
 
-    fun disablePlugins(pluginName: String) {
+    fun enablePlugin(pluginName: String) {
+        enablePlugins(setOf(pluginName))
+    }
+
+    fun enablePlugins(pluginNames: Iterable<String>) {
+        val set = pluginNames.toSet()
+        updateWithDetectChanges {
+            it.copy(
+                plugins = it.plugins.map { p ->
+                    if (p.name in set) p.copy(enabled = true) else p
+                }
+            )
+        }
+    }
+
+    fun disablePlugin(pluginName: String) {
         disablePlugins(setOf(pluginName))
     }
 
@@ -127,6 +142,10 @@ data class KotlinPluginDescriptor(
         SAME_MAJOR,
         LATEST,
     }
+}
+
+fun KotlinPluginDescriptor.hasArtifact(artifact: String): Boolean {
+    return ids.any { it.id == artifact }
 }
 
 data class MavenId(val id: String) {
