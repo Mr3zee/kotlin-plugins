@@ -171,8 +171,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         )
 
         repoTable = JBTable(repoModel).apply {
-            columnModel.getColumn(0).preferredWidth = 100
-            columnModel.getColumn(1).preferredWidth = 300
+            columnModel.getColumn(0).preferredWidth = 100.scaled
+            columnModel.getColumn(1).preferredWidth = 300.scaled
             emptyText.text = "No repositories configured"
             rowSorter = TableRowSorter(repoModel).apply {
                 setSortable(0, true)
@@ -212,11 +212,11 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         )
 
         pluginsTable = JBTable(pluginsModel).apply {
-            columnModel.getColumn(0).preferredWidth = 20
-            columnModel.getColumn(1).preferredWidth = 100
-            columnModel.getColumn(2).preferredWidth = 300
-            columnModel.getColumn(3).preferredWidth = 80
-            columnModel.getColumn(4).preferredWidth = 150
+            columnModel.getColumn(0).preferredWidth = 20.scaled
+            columnModel.getColumn(1).preferredWidth = 100.scaled
+            columnModel.getColumn(2).preferredWidth = 300.scaled
+            columnModel.getColumn(3).preferredWidth = 80.scaled
+            columnModel.getColumn(4).preferredWidth = 150.scaled
             emptyText.text = "No plugins configured"
             rowSorter = TableRowSorter(pluginsModel).apply {
                 setSortable(0, false)
@@ -496,7 +496,7 @@ private class RepositoryDialog(
     private val nameField = JBTextField(initial?.name.orEmpty()).apply {
         emptyText.text = "Unique name"
 
-        minimumSize = Dimension(300, minimumSize.height)
+        minimumSize = Dimension(300.scaled, minimumSize.height)
         toolTipText = if (isDefault) "Default repository name cannot be edited" else "Name must be unique"
     }
 
@@ -504,7 +504,7 @@ private class RepositoryDialog(
         emptyText.text = "Maven repository URL"
 
         text = if (initial?.value?.startsWith("http") == true) initial.value else ""
-        minimumSize = Dimension(600, minimumSize.height)
+        minimumSize = Dimension(600.scaled, minimumSize.height)
 
         if (isDefault) {
             toolTipText = "Default repository url cannot be edited"
@@ -572,7 +572,7 @@ private class RepositoryDialog(
             .addLabeledComponent(urlLabel, urlField)
             .addLabeledComponent(pathLabel, pathField)
             .panel
-        form.preferredSize = Dimension(650, 0)
+        form.preferredSize = Dimension(650.scaled, 0.scaled)
         return form
     }
 
@@ -653,7 +653,7 @@ private class PluginsDialog(
     private val nameField = JBTextField(initial?.name.orEmpty(), 30).apply {
         emptyText.text = "Unique name"
 
-        minimumSize = Dimension(300, minimumSize.height)
+        minimumSize = Dimension(300.scaled, minimumSize.height)
 
         toolTipText = if (isDefault) {
             "Default plugin name cannot be edited"
@@ -681,7 +681,7 @@ private class PluginsDialog(
 
         model = idsModel
 
-        minimumSize = Dimension(600, minimumSize.height)
+        minimumSize = Dimension(600.scaled, minimumSize.height)
         toolTipText = if (isDefault) {
             "Default plugin coordinates cannot be edited"
         } else {
@@ -750,7 +750,7 @@ private class PluginsDialog(
 
     override fun createCenterPanel(): JComponent {
         val reposPanel = JBScrollPane(reposContainer).apply {
-            minimumSize = Dimension(300, 120)
+            minimumSize = Dimension(300.scaled, 120.scaled)
         }
 
         val form = FormBuilder.createFormBuilder()
@@ -758,12 +758,12 @@ private class PluginsDialog(
             .addLabeledComponent(JBLabel("Name:"), nameField)
             .addLabeledComponent(JBLabel("Coordinates:"), tablePanel)
             .addLabeledComponent(JBLabel("Version matching:"), versionMatchingField)
-            .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10)
+            .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10.scaled)
             .addComponent(enabledCheckbox)
             .addComponent(ignoreExceptionsCheckbox)
             .panel
 
-        form.preferredSize = Dimension(650, 0)
+        form.preferredSize = Dimension(650.scaled, 0.scaled)
         return form
     }
 

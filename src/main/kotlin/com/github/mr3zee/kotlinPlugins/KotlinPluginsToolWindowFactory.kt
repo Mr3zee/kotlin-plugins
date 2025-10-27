@@ -22,6 +22,9 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.LogicalPosition
+import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
@@ -41,16 +44,13 @@ import com.intellij.ui.EditorTextField
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
-import com.intellij.ui.TitledSeparator
 import com.intellij.ui.TreeUIHelper
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
-import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.dsl.builder.AlignX
-import com.intellij.ui.dsl.builder.AlignY
 import com.intellij.ui.dsl.builder.Cell
 import com.intellij.ui.dsl.builder.LabelPosition
 import com.intellij.ui.dsl.builder.Panel
@@ -62,7 +62,6 @@ import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
-import com.jgoodies.forms.factories.Borders
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -90,7 +89,6 @@ import javax.swing.JScrollPane
 import javax.swing.ListCellRenderer
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingConstants
-import javax.swing.SwingUtilities
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreeNode
@@ -322,7 +320,7 @@ internal class OverviewPanel(
         if (p != pluginName) return
         if (mavenId == null || m == null || mavenId == m) {
             if (version == null || v == null || version == v) {
-                SwingUtilities.invokeLater { render() }
+                ApplicationManager.getApplication().invokeLater { render() }
             }
         }
     }
@@ -434,10 +432,10 @@ internal class OverviewPanel(
                         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
                         if (analyzer.state.enabled) {
                             addRootPanel(customiseComponent = {
-                                it.maximumSize.width = 600
-                                it.minimumSize.width = 270
-                                it.preferredSize.width = 600
-                                it.preferredSize.height = 270
+                                it.maximumSize.width = 600.scaled
+                                it.minimumSize.width = 270.scaled
+                                it.preferredSize.width = 600.scaled
+                                it.preferredSize.height = 270.scaled
                             }) {
                                 val reporter = project.service<KotlinPluginsExceptionReporter>()
                                 val report = reporter.getExceptionsReport(plugin, mavenId, version)
@@ -455,101 +453,7 @@ internal class OverviewPanel(
 
                                     separator()
 
-                                    val exceptionsAnalysis = when {
-                                        report.kotlinVersionMismatch != null && report.isProbablyIncompatible -> {
-                                            """
-                                                <strong>Exceptions Analysis</strong><br/>
-                                                <br/>
-                                                The version of the plugin is not compatible with the version of the IDE.<br/>
-                                                This may be the cause for the exceptions thrown.<br/>
-                                                Compiler API is not binary compatible between Kotlin versions.<br/>
-                                                <br/>
-                                                Indicated Kotlin version in the jar: ${report.kotlinVersionMismatch.jarVersion}<br/>
-                                                In IDE Kotlin version: ${report.kotlinVersionMismatch.ideVersion}<br/>
-                                                <br/>
-                                            """.trimIndent()
-                                        }
-
-                                        report.isProbablyIncompatible -> {
-                                            val kotlinIdeVersion = project.service<KotlinVersionService>()
-                                                .getKotlinIdePluginVersion()
-
-                                            """
-                                                <strong>Exceptions Analysis</strong><br/>
-                                                <br/>
-                                                Exceptions thrown are likely to be the sign of a binary incompatibility
-                                                between the Kotlin version of the IDE and the Kotlin version of the plugin.<br/>
-                                                The plugin indicates that the Kotlin version match, however this might not be the case.<br/>
-                                                <br/>
-                                                In IDE Kotlin version: $kotlinIdeVersion<br/>
-                                                <br/>
-                                            """.trimIndent()
-                                        }
-
-                                        else -> ""
-                                    }
-
-                                    val actionSuggestion = when {
-                                        report.reloadedSame && report.isLocal -> {
-                                            """
-                                                <strong>Action suggestion</strong><br/>
-                                                <br/>
-                                                The jar was loaded from a local source 
-                                                and was reloaded at least once with the same content so the exception persists 
-                                                (for example, during a manual or a background update).<br/>
-                                                If you are developing the plugin, try changing its logic 
-                                                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
-                                            """.trimIndent()
-                                        }
-
-                                        report.isLocal -> {
-                                            """
-                                                <strong>Action suggestion</strong><br/>
-                                                <br/>
-                                                The jar was loaded from a local source.<br/>
-                                                If you are developing the plugin, try changing its logic 
-                                                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
-                                            """.trimIndent()
-                                        }
-
-                                        report.reloadedSame -> {
-                                            """
-                                                <strong>Action suggestion</strong><br/>
-                                                <br/>
-                                                The jar was loaded from a remote source 
-                                                and was reloaded at least once with the same content so the exception persists 
-                                                (for example, during a manual or a background update).<br/>
-                                                If you are developing the plugin, try changing its logic 
-                                                and republishing it to the same place and run 'Update' action<br/>
-                                            """.trimIndent()
-                                        }
-
-                                        report.kotlinVersionMismatch != null -> {
-                                            """
-                                                <strong>Action suggestion</strong><br/>
-                                                <br/>
-                                                The jar was loaded unsafely, using a fallback without the compatibilities guarantee.<br/>
-                                                If you are developing the plugin, try publishing it with the same Kotlin version as the IDE.<br/>
-                                                If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
-                                            """.trimIndent()
-                                        }
-
-                                        else -> """
-                                            <strong>Action suggestion</strong><br/>
-                                            <br/>
-                                            If you are developing the plugin - you need to check the exceptions and replace them with diagnostics.<br/>
-                                            If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
-                                        """.trimIndent()
-                                    }
-
-                                    val hint = """
-                                        |<html>
-                                        |$exceptionsAnalysis
-                                        |$actionSuggestion
-                                        |</html>
-                                    """.trimMargin()
-
-                                    row { label(hint) }
+                                    row { label(report.hint(project)) }
 
                                     row {
                                         button("Create Report") {
@@ -559,14 +463,38 @@ internal class OverviewPanel(
 
                                     separator()
 
-                                    val exceptionPanes = mutableListOf<Pair<EditorTextField, Throwable>>()
+                                    val exceptionPanes = mutableListOf<Pair<ExceptionEditorTextField, Throwable>>()
                                     report.exceptions.forEachIndexed { index, ex ->
-                                        val groupTitle = "#${index + 1}: ${ex::class.java.name}: ${ex.message ?: ""}"
+                                        val groupTitle =
+                                            "#${index + 1}: ${ex::class.java.name}: ${ex.message ?: ""}"
+                                        var editorField: ExceptionEditorTextField? = null
                                         val group = collapsibleGroup(groupTitle) {
-                                            val (text, ranges) = exceptionTextAndHighlights(ex, emptySet())
-                                            val editor = createExceptionEditor(text, ranges)
-                                            row { cell(editor) }
-                                            exceptionPanes.add(editor to ex)
+                                            val (text, _) = exceptionTextAndHighlights(ex, emptySet())
+                                            editorField = ExceptionEditorTextField(text, project)
+                                            row {
+                                                cell(editorField)
+                                                    .align(AlignX.FILL)
+                                            }
+                                            exceptionPanes.add(editorField to ex)
+                                        }
+
+                                        // ADDED: scroll to top when the panel is expanded (on EDT, after layout)
+                                        group.addExpandedListener { expanded ->
+                                            if (expanded) {
+                                                val ed = editorField?.editor
+                                                if (ed != null) {
+                                                    ApplicationManager.getApplication().invokeLater {
+                                                        // Put caret to the beginning and ensure top is visible
+                                                        ed.caretModel.moveToOffset(0)
+                                                        ed.scrollingModel.scrollTo(
+                                                            LogicalPosition(0, 0),
+                                                            ScrollType.MAKE_VISIBLE
+                                                        )
+                                                        // And/or force vertical position to 0 for good measure
+                                                        ed.scrollingModel.scrollVertically(0)
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         fun updateTitle() {
@@ -581,6 +509,7 @@ internal class OverviewPanel(
                                             override fun componentShown(e: ComponentEvent) {
                                                 updateTitle()
                                             }
+
                                             override fun componentResized(e: ComponentEvent) {
                                                 updateTitle()
                                             }
@@ -662,10 +591,10 @@ internal class OverviewPanel(
 
                         addRootPanel(
                             customiseComponent = {
-                                it.maximumSize.width = 600
-                                it.minimumSize.width = 270
-                                it.preferredSize.width = 600
-                                it.preferredSize.height = 270
+                                it.maximumSize.width = 600.scaled
+                                it.minimumSize.width = 270.scaled
+                                it.preferredSize.width = 600.scaled
+                                it.preferredSize.height = 270.scaled
                             }
                         ) {
                             var area: Cell<JBTextArea>? = null
@@ -901,61 +830,96 @@ internal class OverviewPanel(
             offset += toAppend.length
         }
         if (lines.size > limit) {
-            val footer = "… truncated ${lines.size - limit} more lines\n"
+            val footer = "\n\u2026 truncated ${lines.size - limit} more lines"
             sb.append(footer)
         }
         return sb.toString() to ranges
     }
 
-    private fun createExceptionEditor(text: String, highlightRanges: List<IntRange>): EditorTextField {
-        return object : EditorTextField(text, project, null) {
-            override fun createEditor(): EditorEx {
-                val ed = super.createEditor()
-                ed.isViewer = true
-                ed.settings.isLineNumbersShown = true
-                ed.settings.isFoldingOutlineShown = false
-                ed.settings.isCaretRowShown = false
-                ed.settings.isUseSoftWraps = true
-                ed.settings.isWhitespacesShown = false
-                applyHighlights(ed, highlightRanges)
-                return ed
-            }
-        }.apply {
-            minimumSize = Dimension(270, 55)
-        }
-    }
+    private class ExceptionEditorTextField(
+        text: String,
+        project: Project,
+    ) : EditorTextField(text, project, null) {
+        @Volatile
+        var highlightRanges = emptyList<IntRange>()
 
-    private fun applyHighlights(editor: com.intellij.openapi.editor.Editor, highlightRanges: List<IntRange>) {
-        val markup = editor.markupModel
-        markup.removeAllHighlighters()
-        val attrs = TextAttributes(
-            /* foregroundColor = */ null,
-            /* backgroundColor = */ JBUI.CurrentTheme.Editor.Tooltip.SUCCESS_BACKGROUND,
-            /* effectColor = */ null,
-            /* effectType = */ null,
-            /* fontType = */ Font.PLAIN,
-        )
-        highlightRanges.forEach { range ->
-            markup.addRangeHighlighter(
-                range.first,
-                range.last + 1,
-                HighlighterLayer.SELECTION - 1,
-                attrs,
-                HighlighterTargetArea.EXACT_RANGE
+        override fun createEditor(): EditorEx {
+            val ed = super.createEditor()
+            ed.isViewer = true
+            ed.isOneLineMode = false
+            ed.scrollPane.verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            ed.scrollPane.horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED
+            ed.settings.isFoldingOutlineShown = false
+            ed.settings.isCaretRowShown = false
+            ed.settings.isUseSoftWraps = true
+            ed.settings.isWhitespacesShown = false
+            applyHighlights(ed, highlightRanges)
+            font = MonospacedFont
+            return ed
+        }
+
+        override fun onEditorAdded(editor: Editor) {
+            super.onEditorAdded(editor)
+            applyHighlights(editor, highlightRanges)
+        }
+
+        override fun getPreferredSize(): Dimension {
+            val base = super.getPreferredSize()
+            val lineHeight = (editor as? EditorEx)?.lineHeight
+                ?: getFontMetrics(font).height
+
+            // Respect HiDPI via JBUI.scale when adding pixel paddings if needed
+            val insets = insets
+            val maxHeight = lineHeight * MAX_STACKTRACE_LINES_IN_VIEW + insets.top + insets.bottom
+            return if (base.height > maxHeight) Dimension(base.width, maxHeight) else base
+        }
+
+        override fun getFont(): Font {
+            return MonospacedFont
+        }
+
+        override fun getMinimumSize(): Dimension {
+            return Dimension(270.scaled, 55.scaled)
+        }
+
+        private fun applyHighlights(editor: Editor, highlightRanges: List<IntRange>) {
+            val markup = editor.markupModel
+            markup.removeAllHighlighters()
+            val attrs = TextAttributes(
+                /* foregroundColor = */ null,
+                /* backgroundColor = */ JBUI.CurrentTheme.Editor.Tooltip.WARNING_BACKGROUND,
+                /* effectColor = */ null,
+                /* effectType = */ null,
+                /* fontType = */ Font.PLAIN,
             )
+
+            highlightRanges.forEach { range ->
+                markup.addRangeHighlighter(
+                    range.first,
+                    range.last + 1,
+                    HighlighterLayer.SELECTION - 1,
+                    attrs,
+                    HighlighterTargetArea.EXACT_RANGE
+                )
+            }
+            editor.component.repaint()
+        }
+
+        fun updateHighlights() {
+            editor?.let { applyHighlights(it, highlightRanges) }
         }
     }
 
-    private fun updateExceptionEditor(editorField: EditorTextField, ex: Throwable, fqNames: Set<String>) {
+    private fun updateExceptionEditor(editorField: ExceptionEditorTextField, ex: Throwable, fqNames: Set<String>) {
         val (text, ranges) = exceptionTextAndHighlights(ex, fqNames)
         editorField.text = text
-        editorField.editor?.let { ed ->
-            applyHighlights(ed, ranges)
-        }
+        editorField.highlightRanges = ranges
+        editorField.updateHighlights()
     }
 
     companion object {
         private const val MAX_STACKTRACE_LINES = 100
+        private const val MAX_STACKTRACE_LINES_IN_VIEW = 15
     }
 
     override fun dispose() {
@@ -1067,13 +1031,17 @@ class KotlinPluginsTreeState : BaseState() {
     }
 
     fun select(pluginName: String? = null, mavenId: String? = null, version: String? = null) {
-        if (pluginName == null) {
-            selectedNodeKey = null
-            return
-        }
+        try {
+            if (pluginName == null) {
+                selectedNodeKey = null
+                return
+            }
 
-        val key = nodeKey(pluginName, mavenId, version)
-        selectedNodeKey = key
+            val key = nodeKey(pluginName, mavenId, version)
+            selectedNodeKey = key
+        } finally {
+            actions.forEach { it() }
+        }
     }
 
     private val actions = mutableListOf<() -> Unit>()
@@ -1375,7 +1343,6 @@ class KotlinPluginsTree(
             }
     }
 
-    // todo update logic for exceptions
     private fun updatePlugin(pluginName: String, status: ArtifactStatus) {
         val key = nodeKey(pluginName)
 
@@ -1626,3 +1593,101 @@ private val NodeType.displayLowerCaseName
         NodeType.Artifact -> "artifact"
         NodeType.Version -> "version"
     }
+
+internal val Int.scaled get() = JBUI.scale(this)
+
+private fun ExceptionsReport.hint(project: Project): String {
+    val exceptionsAnalysis = when {
+        kotlinVersionMismatch != null && isProbablyIncompatible -> {
+            """
+                <strong>Exceptions Analysis</strong><br/>
+                <br/>
+                The version of the plugin is not compatible with the version of the IDE.<br/>
+                This may be the cause for the exceptions thrown.<br/>
+                Compiler API is not binary compatible between Kotlin versions.<br/>
+                <br/>
+                Indicated Kotlin version in the jar: ${kotlinVersionMismatch.jarVersion}<br/>
+                In IDE Kotlin version: ${kotlinVersionMismatch.ideVersion}<br/>
+                <br/>
+            """.trimIndent()
+        }
+
+        isProbablyIncompatible -> {
+            val kotlinIdeVersion = project.service<KotlinVersionService>()
+                .getKotlinIdePluginVersion()
+
+            """
+                <strong>Exceptions Analysis</strong><br/>
+                <br/>
+                Exceptions thrown are likely to be the sign of a binary incompatibility
+                between the Kotlin version of the IDE and the Kotlin version of the plugin.<br/>
+                The plugin indicates that the Kotlin version match, however this might not be the case.<br/>
+                <br/>
+                In IDE Kotlin version: $kotlinIdeVersion<br/>
+                <br/>
+            """.trimIndent()
+        }
+
+        else -> ""
+    }
+
+    val actionSuggestion = when {
+        reloadedSame && isLocal -> {
+            """
+                <strong>Action suggestion</strong><br/>
+                <br/>
+                The jar was loaded from a local source 
+                and was reloaded at least once with the same content so the exception persists 
+                (for example, during a manual or a background update).<br/>
+                If you are developing the plugin, try changing its logic 
+                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
+            """.trimIndent()
+        }
+
+        isLocal -> {
+            """
+                <strong>Action suggestion</strong><br/>
+                <br/>
+                The jar was loaded from a local source.<br/>
+                If you are developing the plugin, try changing its logic 
+                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
+            """.trimIndent()
+        }
+
+        reloadedSame -> {
+            """
+                <strong>Action suggestion</strong><br/>
+                <br/>
+                The jar was loaded from a remote source 
+                and was reloaded at least once with the same content so the exception persists 
+                (for example, during a manual or a background update).<br/>
+                If you are developing the plugin, try changing its logic 
+                and republishing it to the same place and run 'Update' action<br/>
+            """.trimIndent()
+        }
+
+        kotlinVersionMismatch != null -> {
+            """
+                <strong>Action suggestion</strong><br/>
+                <br/>
+                The jar was loaded unsafely, using a fallback without the compatibilities guarantee.<br/>
+                If you are developing the plugin, try publishing it with the same Kotlin version as the IDE.<br/>
+                If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
+            """.trimIndent()
+        }
+
+        else -> """
+            <strong>Action suggestion</strong><br/>
+            <br/>
+            If you are developing the plugin - you need to check the exceptions and replace them with diagnostics.<br/>
+            If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
+        """.trimIndent()
+    }
+
+    return """
+        |<html>
+        |$exceptionsAnalysis
+        |$actionSuggestion
+        |</html>
+    """.trimMargin()
+}
