@@ -96,6 +96,7 @@ import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.isDirectory
+import kotlin.math.ceil
 
 class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(
@@ -124,7 +125,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         val overviewPanel = OverviewPanel(project, state, tree)
         tree.overviewPanel = overviewPanel
         val tabs = JBTabbedPane()
-        tabs.addTab("Overview", overviewPanel.component)
+        tabs.addTab("Overview", overviewPanel.overviewPanelComponent)
         tabs.addTab("Logs", createPanel("Logs tab is empty"))
         splitter.secondComponent = tabs
 
@@ -266,14 +267,14 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         const val ID = "Kotlin Plugins Diagnostics"
         const val DISPLAY_NAME = "Kotlin Plugins Diagnostics"
         const val PROPORTION_KEY = "KotlinPlugins.Proportion"
-
-        fun show(project: Project) {
-            ToolWindowManager
-                .getInstance(project)
-                .getToolWindow(ID)
-                ?.show()
-        }
     }
+}
+
+internal fun showKotlinPluginsToolWindow(project: Project) {
+    ToolWindowManager
+        .getInstance(project)
+        .getToolWindow(KotlinPluginsToolWindowFactory.ID)
+        ?.show()
 }
 
 internal class OverviewPanel(
@@ -281,7 +282,7 @@ internal class OverviewPanel(
     private val state: KotlinPluginsTreeState,
     private val tree: KotlinPluginsTree,
 ) : Disposable {
-    val component: JPanel = JPanel(BorderLayout()).apply {
+    val overviewPanelComponent: JPanel = JPanel(BorderLayout()).apply {
         border = BorderFactory.createEmptyBorder(0, 0, 0, 0)
     }
 
@@ -313,6 +314,8 @@ internal class OverviewPanel(
         render()
     }
 
+    private var exceptionsRepaint: (() -> Unit)? = null
+
     private fun refreshIfAffectsSelection(pluginName: String, mavenId: String? = null, version: String? = null) {
         val selectedKey = state.selectedNodeKey
         val (p, m, v) = parseKey(selectedKey)
@@ -320,7 +323,14 @@ internal class OverviewPanel(
         if (p != pluginName) return
         if (mavenId == null || m == null || mavenId == m) {
             if (version == null || v == null || version == v) {
-                ApplicationManager.getApplication().invokeLater { render() }
+                val status = tree.statusForKey(selectedKey)
+                val exceptionsRepaint = exceptionsRepaint
+                if (status is ArtifactStatus.ExceptionInRuntime && exceptionsRepaint != null) {
+                    exceptionsRepaint()
+                } else {
+                    this.exceptionsRepaint = null
+                    ApplicationManager.getApplication().invokeLater { render() }
+                }
             }
         }
     }
@@ -336,6 +346,8 @@ internal class OverviewPanel(
     }
 
     private fun render() {
+        println("render")
+        exceptionsRepaint = null
         val selectedKey = state.selectedNodeKey
         val status = tree.statusForKey(selectedKey)
         val (plugin, mavenId, version) = parseKey(selectedKey)
@@ -437,102 +449,7 @@ internal class OverviewPanel(
                                 it.preferredSize.width = 600.scaled
                                 it.preferredSize.height = 270.scaled
                             }) {
-                                val reporter = project.service<KotlinPluginsExceptionReporter>()
-                                val report = reporter.getExceptionsReport(plugin, mavenId, version)
-
-                                if (status is ArtifactStatus.ExceptionInRuntime && report != null) {
-                                    row {
-                                        label("Exception(s) occurred in runtime")
-                                            .comment(
-                                                """
-                                                    A compiler plugin must never throw an exception<br/>
-                                                    Instead it must report errors using diagnostics<br/>
-                                                """.trimIndent()
-                                            )
-                                    }
-
-                                    separator()
-
-                                    row { label(report.hint(project)) }
-
-                                    row {
-                                        button("Create Report") {
-                                            // todo
-                                        }
-                                    }
-
-                                    separator()
-
-                                    val exceptionPanes = mutableListOf<Pair<ExceptionEditorTextField, Throwable>>()
-                                    report.exceptions.forEachIndexed { index, ex ->
-                                        val groupTitle =
-                                            "#${index + 1}: ${ex::class.java.name}: ${ex.message ?: ""}"
-                                        var editorField: ExceptionEditorTextField? = null
-                                        val group = collapsibleGroup(groupTitle) {
-                                            val (text, _) = exceptionTextAndHighlights(ex, emptySet())
-                                            editorField = ExceptionEditorTextField(text, project)
-                                            row {
-                                                cell(editorField)
-                                                    .align(AlignX.FILL)
-                                            }
-                                            exceptionPanes.add(editorField to ex)
-                                        }
-
-                                        // ADDED: scroll to top when the panel is expanded (on EDT, after layout)
-                                        group.addExpandedListener { expanded ->
-                                            if (expanded) {
-                                                val ed = editorField?.editor
-                                                if (ed != null) {
-                                                    ApplicationManager.getApplication().invokeLater {
-                                                        // Put caret to the beginning and ensure top is visible
-                                                        ed.caretModel.moveToOffset(0)
-                                                        ed.scrollingModel.scrollTo(
-                                                            LogicalPosition(0, 0),
-                                                            ScrollType.MAKE_VISIBLE
-                                                        )
-                                                        // And/or force vertical position to 0 for good measure
-                                                        ed.scrollingModel.scrollVertically(0)
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        fun updateTitle() {
-                                            setEllipsized(this@OverviewPanel.component, labelFont, groupTitle) {
-                                                group.setTitle(it)
-                                            }
-                                        }
-
-                                        updateTitle()
-
-                                        component.addComponentListener(object : ComponentAdapter() {
-                                            override fun componentShown(e: ComponentEvent) {
-                                                updateTitle()
-                                            }
-
-                                            override fun componentResized(e: ComponentEvent) {
-                                                updateTitle()
-                                            }
-                                        })
-                                    }
-
-                                    loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
-                                        ApplicationManager.getApplication().invokeLater {
-                                            exceptionPanes.forEach { (pane, throwable) ->
-                                                updateExceptionEditor(pane, throwable, names)
-                                            }
-                                        }
-                                    }
-
-                                    separator()
-                                } else if (status == ArtifactStatus.ExceptionInRuntime && report == null) {
-                                    row {
-                                        label("Failed to show exceptions.")
-                                            .comment("This is probably due to a bug in our IntelliJ plugin.")
-                                    }
-
-                                    separator()
-                                }
+                                exceptionsRepaint = exceptionsPanel(plugin, mavenId, version, status)
 
                                 if (status is ArtifactStatus.ExceptionInRuntime || status is ArtifactStatus.Success) {
                                     val model = DefaultListModel<String>()
@@ -565,8 +482,8 @@ internal class OverviewPanel(
                                                 names.sorted().forEach { model.addElement(it) }
                                                 list?.isVisible = true
                                             }
-                                            component.revalidate()
-                                            component.repaint()
+                                            overviewPanelComponent.revalidate()
+                                            overviewPanelComponent.repaint()
                                         }
                                     }
                                 }
@@ -625,10 +542,10 @@ internal class OverviewPanel(
             }
         }
 
-        component.removeAll()
-        component.add(parentPanel, BorderLayout.CENTER)
-        component.revalidate()
-        component.repaint()
+        overviewPanelComponent.removeAll()
+        overviewPanelComponent.add(parentPanel, BorderLayout.CENTER)
+        overviewPanelComponent.revalidate()
+        overviewPanelComponent.repaint()
     }
 
     private fun Row.grayed(@NlsContexts.Label text: String) = label(text).applyToComponent {
@@ -836,6 +753,137 @@ internal class OverviewPanel(
         return sb.toString() to ranges
     }
 
+    private fun Panel.exceptionsPanel(
+        plugin: String,
+        mavenId: String,
+        version: String,
+        status: ArtifactStatus?,
+    ): () -> Unit {
+        val reporter = project.service<KotlinPluginsExceptionReporter>()
+        val report = reporter.getExceptionsReport(plugin, mavenId, version)
+        var hintLabel: JLabel? = null
+        var exceptionsPanel: JComponent? = null
+
+        if (status is ArtifactStatus.ExceptionInRuntime && report != null) {
+            row {
+                label("Exception(s) occurred in runtime")
+                    .comment(
+                        """
+                            A compiler plugin must never throw an exception<br/>
+                            Instead it must report errors using diagnostics<br/>
+                        """.trimIndent()
+                    )
+            }
+
+            separator()
+
+            row {
+                hintLabel = label(report.hint()).component
+            }
+
+            row {
+                button("Create Report") {
+                    // todo
+                }
+            }
+
+            separator()
+
+            exceptionsPanel = JPanel().apply {
+                layout = BorderLayout()
+            }
+
+            val exceptionPanes = mutableListOf<Pair<ExceptionEditorTextField, Throwable>>()
+            exceptionsPanel.add(com.intellij.ui.dsl.builder.panel {
+                report.exceptions.forEachIndexed { index, ex ->
+                    val groupTitle = "#${index + 1}: ${ex::class.java.name}: ${ex.message ?: ""}"
+                    var editorField: ExceptionEditorTextField? = null
+                    val group = collapsibleGroup(groupTitle) {
+                        val (text, _) = exceptionTextAndHighlights(ex, emptySet())
+                        editorField = ExceptionEditorTextField(text, project)
+                        row {
+                            cell(editorField)
+                                .align(AlignX.FILL)
+                        }
+                        exceptionPanes.add(editorField to ex)
+                    }
+
+                    group.addExpandedListener { expanded ->
+                        if (expanded) {
+                            val ed = editorField?.editor
+                            if (ed != null) {
+                                ApplicationManager.getApplication().invokeLater {
+                                    // Put caret to the beginning and ensure top is visible
+                                    ed.caretModel.moveToOffset(0)
+                                    ed.scrollingModel.scrollTo(
+                                        LogicalPosition(0, 0),
+                                        ScrollType.MAKE_VISIBLE
+                                    )
+                                    // And/or force vertical position to 0 for good measure
+                                    ed.scrollingModel.scrollVertically(0)
+                                }
+                            }
+                        }
+                    }
+
+                    fun updateTitle() {
+                        setEllipsized(this@OverviewPanel.overviewPanelComponent, labelFont, groupTitle) {
+                            group.setTitle(it)
+                        }
+                    }
+
+                    updateTitle()
+
+                    overviewPanelComponent.addComponentListener(object : ComponentAdapter() {
+                        override fun componentShown(e: ComponentEvent) {
+                            updateTitle()
+                        }
+
+                        override fun componentResized(e: ComponentEvent) {
+                            updateTitle()
+                        }
+                    })
+                }
+            })
+
+            row { cell(exceptionsPanel) }
+
+            loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
+                ApplicationManager.getApplication().invokeLater {
+                    exceptionPanes.forEach { (pane, throwable) ->
+                        updateExceptionEditor(pane, throwable, names)
+                    }
+                }
+            }
+
+            separator()
+        } else if (status == ArtifactStatus.ExceptionInRuntime && report == null) {
+            row {
+                label("Failed to show exceptions.")
+                    .comment("This is probably due to a bug in our IntelliJ plugin.")
+            }
+
+            separator()
+        }
+
+        return {
+            println("repaint")
+            val reporter = project.service<KotlinPluginsExceptionReporter>()
+            val newReport = reporter.getExceptionsReport(plugin, mavenId, version)
+
+            if (newReport != report) {
+                if (newReport?.__exceptionsIds != report?.__exceptionsIds) {
+                    exceptionsPanel?.revalidate()
+                    exceptionsPanel?.repaint()
+                }
+
+                hintLabel?.revalidate()
+                hintLabel?.repaint()
+            }
+        }
+    }
+
+    @Suppress("JComponentDataProvider")
     private class ExceptionEditorTextField(
         text: String,
         project: Project,
@@ -917,11 +965,6 @@ internal class OverviewPanel(
         editorField.updateHighlights()
     }
 
-    companion object {
-        private const val MAX_STACKTRACE_LINES = 100
-        private const val MAX_STACKTRACE_LINES_IN_VIEW = 15
-    }
-
     override fun dispose() {
         state.removeOnSelectedState(::render)
     }
@@ -957,6 +1000,11 @@ internal class OverviewPanel(
     }
 
     private val labelFont = JBLabel().font
+
+    companion object {
+        private const val MAX_STACKTRACE_LINES = 100
+        private const val MAX_STACKTRACE_LINES_IN_VIEW = 15
+    }
 }
 
 private class NodeData(
@@ -1596,7 +1644,7 @@ private val NodeType.displayLowerCaseName
 
 internal val Int.scaled get() = JBUI.scale(this)
 
-private fun ExceptionsReport.hint(project: Project): String {
+private fun ExceptionsReport.hint(): String {
     val exceptionsAnalysis = when {
         kotlinVersionMismatch != null && isProbablyIncompatible -> {
             """
@@ -1613,7 +1661,7 @@ private fun ExceptionsReport.hint(project: Project): String {
         }
 
         isProbablyIncompatible -> {
-            val kotlinIdeVersion = project.service<KotlinVersionService>()
+            val kotlinIdeVersion = service<KotlinVersionService>()
                 .getKotlinIdePluginVersion()
 
             """

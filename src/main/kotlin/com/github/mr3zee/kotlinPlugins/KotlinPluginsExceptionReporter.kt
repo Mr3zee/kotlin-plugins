@@ -47,7 +47,34 @@ class ExceptionsReport(
     // The Kotlin version of the jar is different from the Kotlin version in the IDE
     val kotlinVersionMismatch: KotlinVersionMismatch?,
     val exceptions: List<Throwable>,
-)
+    // only for comparison
+    @Suppress("PropertyName")
+    val __exceptionsIds: List<String>,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ExceptionsReport
+
+        if (isLocal != other.isLocal) return false
+        if (reloadedSame != other.reloadedSame) return false
+        if (isProbablyIncompatible != other.isProbablyIncompatible) return false
+        if (kotlinVersionMismatch != other.kotlinVersionMismatch) return false
+        if (__exceptionsIds != other.__exceptionsIds) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = isLocal.hashCode()
+        result = 31 * result + reloadedSame.hashCode()
+        result = 31 * result + isProbablyIncompatible.hashCode()
+        result = 31 * result + (kotlinVersionMismatch?.hashCode() ?: 0)
+        result = 31 * result + __exceptionsIds.hashCode()
+        return result
+    }
+}
 
 class KotlinPluginsExceptionReporterImpl(
     val project: Project,
@@ -98,12 +125,31 @@ class KotlinPluginsExceptionReporterImpl(
     private val stackTraceMap = ConcurrentHashMap<JarId, Set<String>>()
     private val metadata = ConcurrentHashMap<JarId, JarMetadata>()
 
-    private val caughtExceptions = ConcurrentHashMap<String, List<CaughtException>>()
+    private val caughtExceptions = ConcurrentHashMap<String, Set<CaughtException>>()
 
     private class CaughtException(
         val jarId: JarId,
+        val exceptionId: String,
         val exception: Throwable,
-    )
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as CaughtException
+
+            if (jarId != other.jarId) return false
+            if (exceptionId != other.exceptionId) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = jarId.hashCode()
+            result = 31 * result + exceptionId.hashCode()
+            return result
+        }
+    }
 
     private data class JarMetadata(
         val checksum: String,
@@ -246,11 +292,34 @@ class KotlinPluginsExceptionReporterImpl(
     ) {
         val plugin = settings.pluginByName(pluginName) ?: return
 
+        val newExceptions = mutableSetOf<JarId>()
+
+        val exceptionId = buildString {
+            append(exception::class.java.name)
+            append('|')
+            append(exception.message ?: "")
+            append('|')
+            append(exception.distinctStacktrace(stackTraceMap[ids.first()].orEmpty()))
+        }
+
         // store anyway to display in UI
         caughtExceptions.compute(pluginName) { _, old ->
-            val exceptions = ids.map { CaughtException(it, exception) }
-            (old.orEmpty() + exceptions).let { new ->
-                new.drop((new.size - EXCEPTIONS_CACHE_SIZE).coerceAtLeast(0))
+            val caughtExceptions = ids.map {
+                CaughtException(it, exceptionId, exception)
+            }
+
+            if (old == null) {
+                newExceptions.addAll(ids)
+            } else {
+                caughtExceptions.forEach {
+                    if (it !in old) {
+                        newExceptions.add(it.jarId)
+                    }
+                }
+            }
+
+            (old.orEmpty() + caughtExceptions).let { new ->
+                new.drop((new.size - EXCEPTIONS_CACHE_SIZE).coerceAtLeast(0)).toSet()
             }
         }
 
@@ -258,7 +327,9 @@ class KotlinPluginsExceptionReporterImpl(
             metadata.compute(id) { _, old ->
                 old?.copy(isProbablyIncompatible = isProbablyIncompatible)
             }
+        }
 
+        newExceptions.forEach { id ->
             statusPublisher.updateVersion(id.pluginName, id.mavenId, id.version, ArtifactStatus.ExceptionInRuntime)
         }
 
@@ -287,22 +358,8 @@ class KotlinPluginsExceptionReporterImpl(
     }
 
     override fun getExceptionsReport(pluginName: String, mavenId: String, version: String): ExceptionsReport? {
-        val jarId = JarId(pluginName, mavenId, version)
-        val lookup = stackTraceMap[jarId].orEmpty()
-
-        val list = caughtExceptions[pluginName].orEmpty()
+        val exceptions = caughtExceptions[pluginName].orEmpty()
             .filter { it.jarId.mavenId == mavenId && it.jarId.version == version }
-            .map { it.exception }
-        // Deduplicate by exception "signature": class + message + full stacktrace
-        val exceptions = list.distinctBy { ex ->
-            buildString {
-                append(ex::class.java.name)
-                append('|')
-                append(ex.message ?: "")
-                append('|')
-                append(ex.distinctStacktrace(lookup))
-            }
-        }
 
         return if (exceptions.isEmpty()) {
             null
@@ -310,11 +367,12 @@ class KotlinPluginsExceptionReporterImpl(
             val metadata = metadata[JarId(pluginName, mavenId, version)] ?: return null
 
             ExceptionsReport(
-                exceptions = exceptions,
+                exceptions = exceptions.map { it.exception },
                 isLocal = metadata.isLocal,
                 reloadedSame = metadata.reloadedSame,
                 isProbablyIncompatible = metadata.isProbablyIncompatible,
                 kotlinVersionMismatch = metadata.kotlinVersionMismatch,
+                __exceptionsIds = exceptions.map { it.exceptionId },
             )
         }
     }
@@ -334,9 +392,7 @@ class KotlinPluginsExceptionReporterImpl(
                 computeMetadata(old, discovery) {
                     new = true
                     caughtExceptions.compute(discovery.pluginName) { _, old ->
-                        old.orEmpty().filterNot {
-                            it.jarId == jarId
-                        }
+                        old.orEmpty().filterNot { it.jarId == jarId }.toSet()
                     }
                 }
             }

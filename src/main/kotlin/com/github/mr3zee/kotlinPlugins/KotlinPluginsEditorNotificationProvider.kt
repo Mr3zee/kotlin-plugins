@@ -80,7 +80,7 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
                 KotlinPluginsTreeState.getInstance(project)
                     .select(pluginOrNull, mavenIdOrNull, versionOrNull)
 
-                KotlinPluginsToolWindowFactory.show(project)
+                showKotlinPluginsToolWindow(project)
             }
 
             panel.setCloseAction {

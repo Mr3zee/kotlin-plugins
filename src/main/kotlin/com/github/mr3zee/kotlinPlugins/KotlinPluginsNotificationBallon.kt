@@ -31,7 +31,7 @@ object KotlinPluginsNotificationBallon {
                             .getInstance(it)
                             .select(disabledPlugin, mavenId, version)
 
-                        KotlinPluginsToolWindowFactory.show(it)
+                        showKotlinPluginsToolWindow(it)
                     }
                     notification.expire()
                 }
