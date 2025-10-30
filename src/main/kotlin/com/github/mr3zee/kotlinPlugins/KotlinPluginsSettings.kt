@@ -93,6 +93,10 @@ class KotlinPluginsSettings(
         }
     }
 
+    fun isEnabled(pluginName: String): Boolean {
+        return safeState().plugins.find { it.name == pluginName }?.enabled ?: false
+    }
+
     fun updateToNewState(
         repositories: List<KotlinArtifactsRepository>,
         plugins: List<KotlinPluginDescriptor>,

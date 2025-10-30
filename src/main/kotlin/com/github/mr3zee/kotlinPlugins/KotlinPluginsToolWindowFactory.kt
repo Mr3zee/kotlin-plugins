@@ -40,6 +40,7 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.AnimatedIcon
+import com.intellij.ui.EditorNotifications
 import com.intellij.ui.EditorTextField
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.ScrollPaneFactory
@@ -96,7 +97,6 @@ import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.isDirectory
-import kotlin.math.ceil
 
 class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(
@@ -775,6 +775,33 @@ internal class OverviewPanel(
                     )
             }
 
+            if (project.service<KotlinPluginsSettings>().isEnabled(plugin)) {
+                row {
+                    cell(ActionLink("Disable this plugin") {
+                        project.service<KotlinPluginsNotifications>().deactivate(plugin)
+                        ApplicationManager.getApplication().invokeLater {
+                            EditorNotifications.getInstance(project).updateAllNotifications()
+                        }
+
+                        project.service<KotlinPluginsSettings>()
+                            .disablePlugin(plugin)
+                    })
+
+                    cell(ActionLink("Auto-disable") {
+                        project.service<KotlinPluginsNotifications>().deactivate(plugin)
+                        ApplicationManager.getApplication().invokeLater {
+                            EditorNotifications.getInstance(project).updateAllNotifications()
+                        }
+
+                        project.service<KotlinPluginsExceptionAnalyzerService>()
+                            .updateState(enabled = true, autoDisable = true)
+
+                        project.service<KotlinPluginsSettings>()
+                            .disablePlugin(plugin)
+                    })
+                }
+            }
+
             separator()
 
             row {
@@ -782,7 +809,7 @@ internal class OverviewPanel(
             }
 
             row {
-                button("Create Report") {
+                button("Create Failure Report") {
                     // todo
                 }
             }
