@@ -608,7 +608,10 @@ class KotlinPluginsStorage(
                             if (old?.checksum != locatorResult.state.jar.checksum) {
                                 old?.key?.cancel()
 
-                                original.parent?.registerSafe(StandardWatchEventKinds.ENTRY_MODIFY)?.let {
+                                original.parent?.registerSafe(
+                                    StandardWatchEventKinds.ENTRY_MODIFY,
+                                    StandardWatchEventKinds.ENTRY_CREATE,
+                                )?.let {
                                     WatchKeyWithChecksum(it, locatorResult.state.jar.checksum)
                                 }
                             } else old
@@ -888,8 +891,10 @@ class KotlinPluginsStorage(
             if (old?.checksum != checksum) {
                 old?.key?.cancel()
 
-                original?.parent?.registerSafe(StandardWatchEventKinds.ENTRY_MODIFY)
-                    ?.let { WatchKeyWithChecksum(it, checksum) }
+                original?.parent?.registerSafe(
+                    StandardWatchEventKinds.ENTRY_MODIFY,
+                    StandardWatchEventKinds.ENTRY_CREATE,
+                )?.let { WatchKeyWithChecksum(it, checksum) }
             } else old
         }
 
