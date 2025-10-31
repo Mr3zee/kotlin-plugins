@@ -44,6 +44,8 @@ sealed interface ArtifactStatus {
         val criteria: KotlinPluginDescriptor.VersionMatching,
     ) : ArtifactStatus
 
+    object PartialSuccess : ArtifactStatus
+
     object InProgress : ArtifactStatus
     class FailedToLoad(val shortMessage: String) : ArtifactStatus
     object ExceptionInRuntime : ArtifactStatus
@@ -67,11 +69,14 @@ sealed interface ArtifactState {
     class NotFound(
         val message: String,
     ) : ArtifactState
+
+    object FoundButBundleIsIncomplete : ArtifactState
 }
 
 private fun ArtifactState.toStatus(): ArtifactStatus {
     return when (this) {
         is ArtifactState.Cached -> ArtifactStatus.Success(requestedVersion, actualVersion, criteria)
+        is ArtifactState.FoundButBundleIsIncomplete -> ArtifactStatus.PartialSuccess
         is ArtifactState.FailedToFetch -> ArtifactStatus.FailedToLoad("Failed to Fetch")
         is ArtifactState.NotFound -> ArtifactStatus.FailedToLoad("Not Found")
     }
@@ -315,7 +320,9 @@ class KotlinPluginsStorage(
     }
 
     private suspend fun fileWatcherLoop() {
-        val key = watchService.take()
+        val key = withContext(Dispatchers.IO) {
+            watchService.take()
+        }
 
         if (!key.isValid) {
             return
@@ -957,7 +964,8 @@ class KotlinPluginsStorage(
                     .substringBefore(".jar")
             }
 
-        val matched = getMatching(versionToPath.keys.toList(), "", requested.asMatchFilter())
+        // the same version check will happen later
+        val matched = getMatching(listOf(versionToPath.keys.toList()), "", requested.asMatchFilter())
 
         return matched?.let { libVersion ->
             val path = versionToPath.getValue(libVersion)

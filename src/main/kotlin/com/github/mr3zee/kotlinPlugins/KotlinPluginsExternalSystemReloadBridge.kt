@@ -72,7 +72,7 @@ class KotlinPluginsExternalSystemReloadBridgeService(
     init {
         // Subscribe to external system notifications for this project
         ExternalSystemProgressNotificationManager.getInstance()
-            .addNotificationListener(listener, project)
+            .addNotificationListener(listener, this)
     }
 
     override fun dispose() {

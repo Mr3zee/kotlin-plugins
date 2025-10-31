@@ -9,6 +9,8 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.utils.io.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.io.readByteArray
 import org.jetbrains.kotlin.config.MavenComparableVersion
 import org.jsoup.Jsoup
@@ -61,6 +63,11 @@ sealed interface LocatorResult {
         override val state: ArtifactState.NotFound,
         override val libVersion: String,
     ) : LocatorResult
+
+    class FoundButBundleIsIncomplete(
+        override val state: ArtifactState.FoundButBundleIsIncomplete,
+        override val libVersion: String,
+    ) : LocatorResult
 }
 
 class Jar(
@@ -95,11 +102,15 @@ internal object KotlinPluginsJarLocator {
         sealed interface Locator {
             data class ByUrl(
                 val url: String,
-            ) : Locator
+            ) : Locator {
+                override fun toString(): String = url
+            }
 
             data class ByPath(
                 val path: Path,
-            ) : Locator
+            ) : Locator {
+                override fun toString(): String = path.absolutePathString()
+            }
         }
     }
 
@@ -113,221 +124,248 @@ internal object KotlinPluginsJarLocator {
 
         logger.debug("$logTag Locating artifact for $kotlinIdeVersion")
 
-        return BundleResult(
-            locatorResults = versioned.descriptor.ids.associateWith { mavenId ->
-                locateArtifact(
-                    logTag = logTag,
-                    versioned = RequestedKotlinPluginDescriptor(versioned.descriptor, versioned.version, mavenId),
-                    kotlinIdeVersion = kotlinIdeVersion,
-                    dest = dest,
-                    known = known[mavenId.id],
-                ).also {
-                    val resultString = when (it) {
-                        is LocatorResult.Cached -> "Cached"
-                        is LocatorResult.NotFound -> "Not Found: ${it.state.message}"
-                        is LocatorResult.FailedToFetch -> "Failed To Fetch: ${it.state.message}"
-                    }
-
-                    logger.debug("$logTag '${mavenId.id}' is $resultString")
-                }
-            }
+        return locateArtifact(
+            logTag = logTag,
+            versioned = versioned,
+            kotlinIdeVersion = kotlinIdeVersion,
+            dest = dest,
+            knownMap = known,
         )
     }
 
     private suspend fun locateArtifact(
         logTag: String,
-        versioned: RequestedKotlinPluginDescriptor,
+        versioned: VersionedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
         dest: Path,
-        known: Jar?,
-    ): LocatorResult {
-        val descriptor = versioned.descriptor
-        val artifact = versioned.artifact
+        knownMap: Map<String, Jar>,
+    ): BundleResult {
+        if (versioned.descriptor.repositories.isEmpty()) {
+            val map = versioned.descriptor.ids.associateWith {
+                LocatorResult.NotFound(
+                    state = ArtifactState.NotFound("No repositories defined"),
+                    libVersion = versioned.version,
+                )
+            }
 
-        var firstSearchedFound = false
-        var firstSearched: LocatorResult = LocatorResult.NotFound(
-            state = ArtifactState.NotFound("No repositories added found for ${artifact.id}"),
-            libVersion = versioned.version,
-        )
+            return BundleResult(map)
+        }
 
-        val notFound = mutableListOf<LocatorResult.NotFound>()
-        val failedToFetch = mutableListOf<LocatorResult.FailedToFetch>()
+        val notFound = mutableMapOf<MavenId, List<LocatorResult.NotFound>>()
+        val failedToFetch = mutableMapOf<MavenId, List<LocatorResult.FailedToFetch>>()
+        val cached = mutableMapOf<MavenId, LocatorResult.Cached>()
 
-        descriptor.repositories.sortedByPriority().forEach {
-            val locator = when (it.type) {
-                KotlinArtifactsRepository.Type.URL -> {
-                    val groupUrl = artifact.groupId.replace(".", "/")
-                    val artifactUrl = "${it.value}/$groupUrl/${artifact.artifactId}"
+        versioned.descriptor.repositories.sortedByPriority().forEach repositoriesLoop@{ repository ->
+            val locators = versioned.descriptor.ids.associateWith { artifact ->
+                when (repository.type) {
+                    KotlinArtifactsRepository.Type.URL -> {
+                        val groupUrl = artifact.groupId.replace(".", "/")
+                        val artifactUrl = "${repository.value}/$groupUrl/${artifact.artifactId}"
 
-                    ArtifactManifest.Locator.ByUrl(artifactUrl)
-                }
+                        ArtifactManifest.Locator.ByUrl(artifactUrl)
+                    }
 
-                KotlinArtifactsRepository.Type.PATH -> {
-                    val artifactPath = Path(it.value)
-                        .resolve(artifact.getPluginGroupPath())
-                        .resolve(artifact.artifactId)
+                    KotlinArtifactsRepository.Type.PATH -> {
+                        val artifactPath = Path(repository.value)
+                            .resolve(artifact.getPluginGroupPath())
+                            .resolve(artifact.artifactId)
 
-                    ArtifactManifest.Locator.ByPath(artifactPath)
+                        ArtifactManifest.Locator.ByPath(artifactPath)
+                    }
                 }
             }
 
-            val manifest = ArtifactManifest(
-                artifactId = artifact.artifactId,
-                locator = locator,
-                matchFilter = versioned.asMatchFilter(),
-                dest = dest,
-                kotlinIdeVersion = kotlinIdeVersion,
-            )
+            val manifestVersions = mutableMapOf<MavenId, ManifestResult.Success>()
 
-            logger.debug("$logTag Accessing manifest from ${manifest.locator}")
+            versioned.descriptor.ids.forEach manifestLoop@{ artifact ->
+                val locator = locators[artifact] ?: return@manifestLoop
 
-            val manifestResult = locateManifestAndGetVersions(locator)
+                val manifestResult = locateManifestAndGetVersions(locator)
 
-            when (manifestResult) {
-                is ManifestResult.Success -> {}
+                when (manifestResult) {
+                    is ManifestResult.Success -> {}
 
-                is ManifestResult.NotFound -> {
-                    notFound.add(
-                        LocatorResult.NotFound(
-                            state = manifestResult.state,
-                            libVersion = versioned.version,
-                        )
-                    )
+                    is ManifestResult.NotFound -> {
+                        notFound.compute(artifact) { _, old ->
+                            old.orEmpty() + LocatorResult.NotFound(
+                                state = manifestResult.state,
+                                libVersion = versioned.version,
+                            )
+                        }
 
-                    return@forEach
+                        return@manifestLoop
+                    }
+
+                    is ManifestResult.FailedToFetch -> {
+                        failedToFetch.compute(artifact) { _, old ->
+                            old.orEmpty() + LocatorResult.FailedToFetch(
+                                state = manifestResult.state,
+                                libVersion = versioned.version,
+                            )
+                        }
+
+                        return@manifestLoop
+                    }
                 }
 
-                is ManifestResult.FailedToFetch -> {
-                    failedToFetch.add(
-                        LocatorResult.FailedToFetch(
-                            state = manifestResult.state,
-                            libVersion = versioned.version,
-                        )
-                    )
+                logger.trace("$logTag Found ${manifestResult.versions.size} versions for ${artifact.artifactId}:$kotlinIdeVersion: $manifestResult")
 
-                    return@forEach
+                manifestVersions[artifact] = manifestResult
+            }
+
+            if (manifestVersions.size != versioned.descriptor.ids.size) {
+                return@repositoriesLoop
+            }
+
+            val matchFilter = versioned.asMatchFilter()
+
+            val libVersion = getMatching(
+                versions = manifestVersions.map { it.value.versions },
+                prefix = "${kotlinIdeVersion}-",
+                filter = matchFilter,
+            ) ?: run {
+                LocatorResult.NotFound(
+                    state = ArtifactState.NotFound(
+                        """
+                            |No compiler plugin artifact exists matching the requested version and criteria: 
+                            |  - Version: ${versioned.version}, prefixed with $kotlinIdeVersion
+                            |  - Criteria: ${matchFilter.matching}
+                            |  - All artifacts in the bundle have the same version.
+                            |Available versions: 
+                            |  - ${manifestVersions.entries.joinToString("\n|  - ") { (k, v) -> "${k.id}: ${v.versions}" }}
+                            |Searched in $repository
+                        """.trimMargin()
+                    ),
+
+                    libVersion = versioned.version,
+                )
+
+                return@repositoriesLoop
+            }
+
+            versioned.descriptor.ids.forEach artifactsLoop@{ artifact ->
+                val known = knownMap[artifact.id]
+                val locator = locators[artifact] ?: return@artifactsLoop
+
+                val manifest = ArtifactManifest(
+                    artifactId = artifact.artifactId,
+                    locator = locator,
+                    matchFilter = versioned.asMatchFilter(),
+                    dest = dest,
+                    kotlinIdeVersion = kotlinIdeVersion,
+                )
+
+                val locatorResult = locateArtifactByManifest(
+                    logTag = logTag,
+                    manifest = manifest,
+                    libVersion = libVersion,
+                    known = known,
+                )
+
+                if (locatorResult is LocatorResult.Cached) {
+                    cached[artifact] = locatorResult
                 }
             }
 
-            logger.trace("$logTag Found ${manifestResult.versions.size} versions for ${artifact.artifactId}:$kotlinIdeVersion: $manifestResult")
-
-            val locatorResult = locateArtifactByManifest(
-                logTag = logTag,
-                versions = manifestResult.versions,
-                manifest = manifest,
-                known = known,
-            )
-
-            if (locatorResult is LocatorResult.Cached && locatorResult.libVersion == versioned.version) {
-                return locatorResult
-            } else {
-                when {
-                    !firstSearchedFound && locatorResult is LocatorResult.Cached -> {
-                        firstSearchedFound = true
-                        firstSearched = locatorResult
-                    }
-
-                    firstSearched is LocatorResult.Cached -> {}
-
-                    locatorResult is LocatorResult.NotFound -> {
-                        notFound.add(locatorResult)
-                    }
-
-                    locatorResult is LocatorResult.FailedToFetch -> {
-                        failedToFetch.add(locatorResult)
-                    }
-                }
+            if (cached.size == versioned.descriptor.ids.size) {
+                // only move when all are found
+                return BundleResult(cached.mapValues { it.value.moved() })
             }
         }
 
-        if (!firstSearchedFound) {
-            if (failedToFetch.isNotEmpty() && notFound.isEmpty()) {
-                if (failedToFetch.size == 1) {
-                    return failedToFetch.first()
-                }
-
-                return LocatorResult.FailedToFetch(
-                    state = ArtifactState.FailedToFetch(
-                        """
-                        |Failed to fetch artifacts from multiple repositories:
-                        ${
-                            failedToFetch.withIndex()
-                                .joinToString("\n") { "|    ${it.index + 1}. ${it.value.state.message}" }
-                        }
-                        """.trimMargin(),
-                    ),
-                    libVersion = versioned.version,
+        return BundleResult(
+            versioned.descriptor.ids.associateWith {
+                accumulate(
+                    failedToFetch = failedToFetch[it].orEmpty(),
+                    notFound = notFound[it].orEmpty(),
+                    cached = cached[it],
                 )
             }
+        )
+    }
 
-            if (failedToFetch.isEmpty() && notFound.isNotEmpty()) {
-                if (notFound.size == 1) {
-                    return notFound.first()
-                }
+    private suspend fun accumulate(
+        failedToFetch: List<LocatorResult.FailedToFetch>,
+        notFound: List<LocatorResult.NotFound>,
+        cached: LocatorResult.Cached?,
+    ): LocatorResult {
+        if (cached != null) {
+            cached.cleanup()
 
-                return LocatorResult.NotFound(
-                    state = ArtifactState.NotFound(
-                        """
-                        |No artifacts found matching the requested version and criteria:
-                        ${
-                            notFound.withIndex()
-                                .joinToString("\n") { "|${it.index + 1}. ${it.value.state.message}" }
-                        }
-                        """.trimMargin(),
-                    ),
-                    libVersion = versioned.version,
-                )
+            return LocatorResult.FoundButBundleIsIncomplete(
+                state = ArtifactState.FoundButBundleIsIncomplete,
+                libVersion = cached.libVersion,
+            )
+        }
+
+        if (failedToFetch.isNotEmpty() && notFound.isEmpty()) {
+            if (failedToFetch.size == 1) {
+                return failedToFetch.first()
             }
 
-            if (failedToFetch.isEmpty()) {
-                return firstSearched
+            val formattedFailedFetchMessages = failedToFetch.withIndex().joinToString("\n") {
+                "|    ${it.index + 1}. ${it.value.state.message}"
             }
 
             return LocatorResult.FailedToFetch(
                 state = ArtifactState.FailedToFetch(
                     """
-                    |Multiple failures occurred while fetching artifacts:
-                    |Failed to fetch:
-                    ${
-                        failedToFetch.withIndex()
-                            .joinToString("\n") { "|${it.index + 1}. ${it.value.state.message}" }
-                    }
-                    |Not found:
-                    ${
-                        notFound.withIndex()
-                            .joinToString("\n") { "|${it.index + 1}. ${it.value.state.message}" }
-                    }
+                        |Failed to fetch artifacts from multiple repositories:
+                        $formattedFailedFetchMessages
                     """.trimMargin(),
                 ),
-                libVersion = versioned.version,
+                libVersion = failedToFetch.first().libVersion,
             )
         }
 
-        return firstSearched
+        if (failedToFetch.isEmpty() && notFound.isNotEmpty()) {
+            if (notFound.size == 1) {
+                return notFound.first()
+            }
+
+            val formattedNotFoundMessages = notFound.withIndex().joinToString("\n") {
+                "|${it.index + 1}. ${it.value.state.message}"
+            }
+
+            return LocatorResult.NotFound(
+                state = ArtifactState.NotFound(
+                    """
+                        |No artifacts found matching the requested version and criteria:
+                        $formattedNotFoundMessages
+                    """.trimMargin(),
+                ),
+                libVersion = notFound.first().libVersion,
+            )
+        }
+
+        val formattedFailedFetchMessages = failedToFetch.withIndex().joinToString("\n") {
+            "|${it.index + 1}. ${it.value.state.message}"
+        }
+
+        val formattedNotFoundMessages = notFound.withIndex().joinToString("\n") {
+            "|${it.index + 1}. ${it.value.state.message}"
+        }
+
+        return LocatorResult.FailedToFetch(
+            state = ArtifactState.FailedToFetch(
+                """
+                    |Multiple failures occurred while fetching artifacts:
+                    |Failed to fetch:
+                    $formattedFailedFetchMessages
+                    |Not found:
+                    $formattedNotFoundMessages
+                """.trimMargin(),
+            ),
+            libVersion = failedToFetch.firstOrNull()?.libVersion ?: notFound.first().libVersion,
+        )
     }
 
     internal suspend fun locateArtifactByManifest(
         logTag: String,
-        versions: List<String>,
         manifest: ArtifactManifest,
+        libVersion: String,
         known: Jar?,
     ): LocatorResult {
-        logger.debug("$logTag Requested version: ${manifest.matchFilter.version}")
-
-        val libVersion = getMatching(versions, "${manifest.kotlinIdeVersion}-", manifest.matchFilter)
-            ?: return LocatorResult.NotFound(
-                state = ArtifactState.NotFound(
-                    """
-                        |No compiler plugin artifact exists matching the requested version and criteria: 
-                        |  - Version: ${manifest.matchFilter.version}, prefixed with ${manifest.kotlinIdeVersion}
-                        |  - Criteria: ${manifest.matchFilter.matching}
-                        |Available versions: ${if (versions.isEmpty()) "none" else versions.joinToString()} 
-                    """.trimMargin()
-                ),
-
-                libVersion = manifest.matchFilter.version,
-            )
-
         val artifactVersion = "${manifest.kotlinIdeVersion}-$libVersion"
 
         logger.debug("$logTag Version to locate: $artifactVersion")
@@ -346,13 +384,13 @@ internal object KotlinPluginsJarLocator {
             is ChecksumResult.Success -> checksumResult.checksum
 
             is ChecksumResult.NotFound -> return LocatorResult.NotFound(
-                state = ArtifactState.NotFound("No checksum file found for $plainFilename"),
+                state = ArtifactState.NotFound("No checksum file found for $plainFilename in ${manifest.locator}"),
                 libVersion = libVersion,
             )
 
             is ChecksumResult.FailedToFetch -> return LocatorResult.FailedToFetch(
                 state = ArtifactState.FailedToFetch(
-                    "Failed to fetch checksum file for $plainFilename: ${checksumResult.message}"
+                    "Failed to fetch checksum file for $plainFilename from ${manifest.locator}: ${checksumResult.message}"
                 ),
                 libVersion = libVersion,
             )
@@ -382,17 +420,20 @@ internal object KotlinPluginsJarLocator {
             artifactVersion = artifactVersion,
             libVersion = libVersion,
             checksum = checksum,
-        ).moved()
+        )
     }
 
-    private fun LocatorResult.moved(): LocatorResult {
+    private suspend fun LocatorResult.moved(): LocatorResult {
         if (this !is LocatorResult.Cached) {
             return this
         }
 
         return if (jar.path.extension == DOWNLOADING_EXTENSION) {
             val finalFilename = jar.path.removeDownloadingExtension()
-            Files.move(jar.path, finalFilename, StandardCopyOption.ATOMIC_MOVE)
+
+            withContext(Dispatchers.IO) {
+                Files.move(jar.path, finalFilename, StandardCopyOption.ATOMIC_MOVE)
+            }
 
             LocatorResult.Cached(
                 jar = Jar(
@@ -407,6 +448,18 @@ internal object KotlinPluginsJarLocator {
             )
         } else {
             this
+        }
+    }
+
+    private suspend fun LocatorResult.Cached.cleanup() {
+        try {
+            if (jar.path.extension == DOWNLOADING_EXTENSION) {
+                withContext(Dispatchers.IO) {
+                    jar.path.deleteIfExists()
+                }
+            }
+        } catch (e: Exception) {
+            logger.debug("Failed to delete file ${jar.path}: ${e::class}: ${e.message}")
         }
     }
 
@@ -527,7 +580,7 @@ internal object KotlinPluginsJarLocator {
             )
 
             is DownloadResult.NotFound -> LocatorResult.NotFound(
-                state = ArtifactState.NotFound("File not found $url"),
+                state = ArtifactState.NotFound("File not found: $url"),
                 libVersion = libVersion,
             )
 
@@ -641,7 +694,9 @@ internal object KotlinPluginsJarLocator {
                     val checksum = try {
                         temp.readText()
                     } catch (e: IOException) {
-                        return ChecksumResult.FailedToFetch("Failed to read checksum file: ${e.message}")
+                        return ChecksumResult.FailedToFetch(
+                            "Failed to read checksum file after downloading from $artifactUrl: ${e.message}"
+                        )
                     }
 
                     ChecksumResult.Success(checksum)
@@ -785,7 +840,7 @@ internal object KotlinPluginsJarLocator {
             }
 
             return ManifestResult.FailedToFetch(
-                ArtifactState.FailedToFetch("Exception downloading the manifest, ${e::class}: ${e.message}")
+                ArtifactState.FailedToFetch("Exception downloading the manifest from $urlString, ${e::class}: ${e.message}")
             )
         }
 
@@ -847,17 +902,19 @@ data class MatchFilter(
     val matching: KotlinPluginDescriptor.VersionMatching,
 )
 
-fun RequestedKotlinPluginDescriptor.asMatchFilter(): MatchFilter {
+fun VersionedKotlinPluginDescriptor.asMatchFilter(): MatchFilter {
     return MatchFilter(version, descriptor.versionMatching)
 }
 
 internal fun getMatching(
-    versions: List<String>,
+    versions: List<List<String>>,
     prefix: String,
     filter: MatchFilter,
 ): String? {
-    val transformed = versions.filter { it.startsWith(prefix) }.map {
-        MavenComparableVersion(it.removePrefix(prefix))
+    val transformed = versions.map { versionsPerArtifact ->
+        versionsPerArtifact.filter { version -> version.startsWith(prefix) }.map { version ->
+            MavenComparableVersion(version.removePrefix(prefix))
+        }
     }
 
     if (transformed.isEmpty()) {
@@ -865,25 +922,31 @@ internal fun getMatching(
     }
 
     // exact version wins over any other
-    if (transformed.firstOrNull { it.toString() == filter.version } != null) {
+    if (transformed.all { it.any { version -> version.toString() == filter.version } }) {
         return filter.version
     }
 
     return when (filter.matching) {
         KotlinPluginDescriptor.VersionMatching.LATEST -> {
-            transformed.maxOrNull()
+            transformed.map { it.maxOrNull() }.distinct().singleOrNull()
         }
 
         KotlinPluginDescriptor.VersionMatching.SAME_MAJOR -> {
             val major = filter.version.substringBefore(".")
 
             transformed
-                .filter { it.toString().substringBefore(".") == major }
-                .maxOrNull()
+                .map { versionsPerArtifact ->
+                    versionsPerArtifact.filter { version ->
+                        version.toString().substringBefore(".") == major
+                    }
+                }
+                .map { it.maxOrNull() }
+                .distinct()
+                .singleOrNull()
         }
 
         KotlinPluginDescriptor.VersionMatching.EXACT -> {
-            null // already checked for exact match above
+            null // already checked for the exact match above
         }
     }.atLeast(filter.version)
 }

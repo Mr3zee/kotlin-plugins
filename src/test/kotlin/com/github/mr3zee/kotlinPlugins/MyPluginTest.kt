@@ -6,6 +6,9 @@ import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 
+// todo
+//  - big jar
+//  - malformed jar
 class MyPluginTest : BasePlatformTestCase() {
     fun testKotlinVersion() {
         val version = service<KotlinVersionService>().getKotlinIdePluginVersion()
@@ -41,12 +44,20 @@ class MyPluginTest : BasePlatformTestCase() {
     }
 
     fun testVersionComparison() {
-        val versions = listOf(
+        val versions1 = listOf(
             "1.9.24-0.2.2-dev-1",
             "1.9.24-0.2.2-dev-2",
             "1.9.24-0.2.3-dev-1",
             "1.9.24-0.5.0-dev-1",
             "1.9.24-1.5.0-dev-1",
+            "1.9.25-0.5.0-dev-1",
+        )
+
+        val versions2 = listOf(
+            "1.9.24-0.2.2-dev-1",
+            "1.9.24-0.2.2-dev-2",
+            "1.9.24-0.2.3-dev-1",
+            "1.9.24-0.5.0-dev-1",
             "1.9.25-0.5.0-dev-1",
         )
 
@@ -65,9 +76,10 @@ class MyPluginTest : BasePlatformTestCase() {
             version = "0.2.3",
         )
 
-        assertEquals("0.2.3-dev-1", getMatching(versions, "1.9.24-", exact))
-        assertEquals("0.5.0-dev-1", getMatching(versions, "1.9.24-", sameMajor))
-        assertEquals("1.5.0-dev-1", getMatching(versions, "1.9.24-", latest))
+        assertEquals("0.2.3-dev-1", getMatching(listOf(versions1, versions2), "1.9.24-", exact))
+        assertEquals("0.5.0-dev-1", getMatching(listOf(versions1, versions2), "1.9.24-", sameMajor))
+        assertEquals("1.5.0-dev-1", getMatching(listOf(versions1), "1.9.24-", latest))
+        assertEquals(null, getMatching(listOf(versions1, versions2), "1.9.24-", latest))
     }
 
     fun testManifestDownload() = runBlocking {

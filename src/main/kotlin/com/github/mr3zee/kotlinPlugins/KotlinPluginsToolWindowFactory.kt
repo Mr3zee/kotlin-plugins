@@ -346,7 +346,6 @@ internal class OverviewPanel(
     }
 
     private fun render() {
-        println("render")
         exceptionsRepaint = null
         val selectedKey = state.selectedNodeKey
         val status = tree.statusForKey(selectedKey)
@@ -440,6 +439,10 @@ internal class OverviewPanel(
                         addRoot(skippedPanel(NodeType.Version))
                     }
 
+                    is ArtifactStatus.PartialSuccess -> {
+                        addRoot(partialSuccessPanel(NodeType.Version))
+                    }
+
                     is ArtifactStatus.Success, is ArtifactStatus.ExceptionInRuntime -> {
                         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
                         if (analyzer.state.enabled) {
@@ -493,7 +496,7 @@ internal class OverviewPanel(
                                 val label = GrayedLabel("Analysis for classes in a jar is disabled.")
 
                                 val actionLink = ActionLink("Open Settings") {
-                                    KotlinPluginsConfigurable.showGeneral(project)
+                                    KotlinPluginsConfigurableUtil.showGeneral(project)
                                 }
 
                                 vertical(label, actionLink)
@@ -620,6 +623,7 @@ internal class OverviewPanel(
             ArtifactStatus.InProgress -> inProgressPanel(type)
             ArtifactStatus.Disabled -> disabledPanel(type, pluginName)
             ArtifactStatus.Skipped -> skippedPanel(type)
+            is ArtifactStatus.PartialSuccess -> partialSuccessPanel(type)
             else -> selectVersionPanel()
         }
     }
@@ -658,10 +662,24 @@ internal class OverviewPanel(
             val orLabel = GrayedLabel("Or")
 
             val settingsLink = ActionLink("Open the Settings") {
-                KotlinPluginsConfigurable.showArtifacts(project)
+                KotlinPluginsConfigurableUtil.showArtifacts(project)
             }
 
             vertical(enableLink, orLabel, settingsLink)
+        }
+    }
+
+    private fun partialSuccessPanel(type: NodeType): JPanel {
+        return mainPanel { GridBagLayout() }.apply {
+            val text = GrayedLabel(
+                "This ${type.displayLowerCaseName} was loaded successfully, but some other parts of the plugin were not."
+            )
+
+            val description = GrayedLabel(
+                "The whole plugin will be skipped until all other parts are loaded."
+            )
+
+            vertical(text, description)
         }
     }
 
@@ -894,7 +912,6 @@ internal class OverviewPanel(
         }
 
         return {
-            println("repaint")
             val reporter = project.service<KotlinPluginsExceptionReporter>()
             val newReport = reporter.getExceptionsReport(plugin, mavenId, version)
 
@@ -1541,6 +1558,7 @@ private fun nodeKey(pluginName: String, mavenId: String? = null, version: String
 
 private fun statusToIcon(status: ArtifactStatus) = when (status) {
     is ArtifactStatus.Success -> AllIcons.RunConfigurations.TestPassed
+    is ArtifactStatus.PartialSuccess -> AllIcons.RunConfigurations.TestPassedIgnored
     ArtifactStatus.InProgress -> AnimatedIcon.Default()
     is ArtifactStatus.FailedToLoad -> AllIcons.RunConfigurations.TestFailed
     ArtifactStatus.ExceptionInRuntime -> AllIcons.RunConfigurations.TestError
@@ -1555,6 +1573,7 @@ enum class NodeType {
 private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type) {
     NodeType.Plugin -> when (status) {
         is ArtifactStatus.Success -> "All plugin artifacts are loaded successfully"
+        is ArtifactStatus.PartialSuccess -> "Some plugin parts failed to load"
         ArtifactStatus.InProgress -> "Plugin is loading/refreshing"
         is ArtifactStatus.FailedToLoad -> "Plugin failed to load at least one artifact"
         ArtifactStatus.ExceptionInRuntime -> "Plugin threw an exception during runtime"
@@ -1564,6 +1583,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
 
     NodeType.Artifact -> when (status) {
         is ArtifactStatus.Success -> "Artifact loaded successfully"
+        is ArtifactStatus.PartialSuccess -> "Some plugin parts failed to load"
         ArtifactStatus.InProgress -> "Artifact is loading/refreshing"
         is ArtifactStatus.FailedToLoad -> "Artifact failed to load"
         ArtifactStatus.ExceptionInRuntime -> "Artifact threw an exception during runtime"
@@ -1583,6 +1603,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
             }
         }
 
+        is ArtifactStatus.PartialSuccess -> "Some plugin parts failed to load"
         ArtifactStatus.InProgress -> "Version is loading/refreshing"
         is ArtifactStatus.FailedToLoad -> "Version failed to load: ${status.shortMessage}"
         ArtifactStatus.ExceptionInRuntime -> "Version threw an exception during runtime"

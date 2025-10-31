@@ -131,6 +131,15 @@ data class KotlinArtifactsRepository(
     val type: Type,
 ) {
     enum class Type { URL, PATH }
+
+    override fun toString(): String {
+        val prefix = when (type) {
+            Type.URL -> "Remote"
+            Type.PATH -> "Local"
+        }
+
+        return "$prefix repository ($name): $value"
+    }
 }
 
 data class KotlinPluginDescriptor(

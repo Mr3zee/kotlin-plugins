@@ -102,21 +102,6 @@ private class LocalState {
 }
 
 class KotlinPluginsConfigurable(private val project: Project) : Configurable {
-    companion object {
-        @Volatile
-        private var selectArtifactsInitially: Boolean = false
-
-        fun showArtifacts(project: Project) {
-            selectArtifactsInitially = true
-            ShowSettingsUtil.getInstance().showSettingsDialog(project, KotlinPluginsConfigurable::class.java)
-        }
-
-        fun showGeneral(project: Project) {
-            selectArtifactsInitially = false
-            ShowSettingsUtil.getInstance().showSettingsDialog(project, KotlinPluginsConfigurable::class.java)
-        }
-    }
-
     private val local: LocalState = LocalState()
 
     private lateinit var repoTable: JBTable
@@ -319,9 +304,9 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         val tabs = JBTabbedPane()
         tabs.addTab("General", generalContent)
         tabs.addTab("Artifacts", artifactsContent)
-        if (selectArtifactsInitially) {
+        if (KotlinPluginsConfigurableUtil.selectArtifactsInitially) {
             tabs.selectedIndex = 1
-            selectArtifactsInitially = false
+            KotlinPluginsConfigurableUtil.selectArtifactsInitially = false
         }
         rootPanel = JPanel(BorderLayout()).apply { add(tabs, BorderLayout.NORTH) }
 
@@ -829,5 +814,20 @@ private class PluginsDialog(
     }
 }
 
-val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()
-val pluginNameRegex = "[a-zA-Z0-9_-]+".toRegex()
+internal val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()
+internal val pluginNameRegex = "[a-zA-Z0-9_-]+".toRegex()
+
+internal object KotlinPluginsConfigurableUtil {
+    @Volatile
+    var selectArtifactsInitially: Boolean = false
+
+    fun showArtifacts(project: Project) {
+        selectArtifactsInitially = true
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, KotlinPluginsConfigurable::class.java)
+    }
+
+    fun showGeneral(project: Project) {
+        selectArtifactsInitially = false
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, KotlinPluginsConfigurable::class.java)
+    }
+}
