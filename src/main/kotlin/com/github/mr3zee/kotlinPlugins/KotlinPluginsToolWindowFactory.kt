@@ -126,7 +126,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         tree.overviewPanel = overviewPanel
         val tabs = JBTabbedPane()
         tabs.addTab("Overview", overviewPanel.overviewPanelComponent)
-        tabs.addTab("Logs", createPanel("Logs tab is empty"))
+        tabs.addTab("Logs", createLogPanel())
         splitter.secondComponent = tabs
 
         // Tree selection -> state + overview refresh
@@ -153,10 +153,13 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         contentManager.addContent(content)
     }
 
-    private fun createPanel(content: String): JPanel {
+    private fun createLogPanel(): JPanel {
         return JPanel().apply {
-            layout = BorderLayout()
-            add(JBLabel(content), BorderLayout.CENTER)
+            layout = GridBagLayout()
+
+            val logNotice = GrayedLabel("Logs tab is WIP.")
+
+            vertical(logNotice)
         }
     }
 
@@ -555,11 +558,6 @@ internal class OverviewPanel(
         foreground = JBUI.CurrentTheme.Label.disabledForeground()
     }
 
-    @Suppress("FunctionName")
-    private fun GrayedLabel(@NlsContexts.Label text: String) = JBLabel(text).apply {
-        foreground = JBUI.CurrentTheme.Label.disabledForeground()
-    }
-
     private fun JLabel.align(alignment: Int): JLabel {
         horizontalAlignment = alignment
         return this
@@ -680,39 +678,6 @@ internal class OverviewPanel(
             )
 
             vertical(text, description)
-        }
-    }
-
-    private fun JPanel.vertical(
-        vararg components: JComponent,
-    ) {
-        val gbc = GridBagConstraints()
-
-        components.forEachIndexed { i, component ->
-            gbc.gridx = 0 // Column 0
-            gbc.gridy = i // Row i
-            if (i != components.lastIndex) {
-                gbc.insets.bottom = 7
-            }
-            this.add(component, gbc)
-        }
-    }
-
-    @Suppress("unused")
-    private fun JPanel.horizontal(
-        vararg components: JComponent,
-        @Suppress("SameParameterValue")
-        rightInset: Int = 5,
-    ) {
-        val gbc = GridBagConstraints()
-
-        components.forEachIndexed { i, component ->
-            gbc.gridx = i // Column i
-            gbc.gridy = 0 // Row 0
-            if (i != components.lastIndex) {
-                gbc.insets.right = rightInset
-            }
-            this.add(component, gbc)
         }
     }
 
@@ -1671,6 +1636,44 @@ private fun <T> Row.jbList(
         result.label(labelComponent, LabelPosition.TOP)
     }
     return list
+}
+
+@Suppress("FunctionName")
+private fun GrayedLabel(@NlsContexts.Label text: String) = JBLabel(text).apply {
+    foreground = JBUI.CurrentTheme.Label.disabledForeground()
+}
+
+private fun JPanel.vertical(
+    vararg components: JComponent,
+) {
+    val gbc = GridBagConstraints()
+
+    components.forEachIndexed { i, component ->
+        gbc.gridx = 0 // Column 0
+        gbc.gridy = i // Row i
+        if (i != components.lastIndex) {
+            gbc.insets.bottom = 7
+        }
+        this.add(component, gbc)
+    }
+}
+
+@Suppress("unused")
+private fun JPanel.horizontal(
+    vararg components: JComponent,
+    @Suppress("SameParameterValue")
+    rightInset: Int = 5,
+) {
+    val gbc = GridBagConstraints()
+
+    components.forEachIndexed { i, component ->
+        gbc.gridx = i // Column i
+        gbc.gridy = 0 // Row 0
+        if (i != components.lastIndex) {
+            gbc.insets.right = rightInset
+        }
+        this.add(component, gbc)
+    }
 }
 
 private val MonospacedFont by lazy {
