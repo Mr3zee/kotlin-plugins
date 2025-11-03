@@ -78,19 +78,24 @@ class KotlinPluginsSettings(
         }
     }
 
-    fun disablePlugin(pluginName: String) {
-        disablePlugins(setOf(pluginName))
+    fun disablePlugin(pluginName: String): Boolean {
+        return disablePlugins(setOf(pluginName))
     }
 
-    fun disablePlugins(pluginNames: Iterable<String>) {
+    fun disablePlugins(pluginNames: Iterable<String>): Boolean {
         val set = pluginNames.toSet()
+        var disabled = false
         updateWithDetectChanges {
             it.copy(
                 plugins = it.plugins.map { p ->
-                    if (p.name in set) p.copy(enabled = false) else p
+                    if (p.name in set) {
+                        disabled = p.enabled
+                        p.copy(enabled = false)
+                    } else p
                 }
             )
         }
+        return disabled
     }
 
     fun isEnabled(pluginName: String): Boolean {

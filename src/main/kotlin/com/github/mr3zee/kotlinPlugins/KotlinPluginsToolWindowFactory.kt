@@ -1599,7 +1599,7 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
         return ArtifactStatus.ExceptionInRuntime
     }
 
-    if (children.any { it.status == ArtifactStatus.PartialSuccess}) {
+    if (children.any { it.status == ArtifactStatus.PartialSuccess }) {
         return ArtifactStatus.PartialSuccess
     }
 

@@ -10,7 +10,6 @@ import com.intellij.util.messages.SimpleMessageBusConnection
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -164,6 +163,7 @@ class KotlinPluginsExceptionReporterImpl(
     override fun dispose() {
         state.getAndSet(null)?.close()
         stackTraceMap.clear()
+        caughtExceptions.clear()
         metadata.clear()
     }
 
@@ -340,14 +340,14 @@ class KotlinPluginsExceptionReporterImpl(
         }
 
         if (autoDisable) {
-            settings.disablePlugin(plugin.name)
-
-            KotlinPluginsNotificationBallon.notify(
-                project = project,
-                disabledPlugin = plugin.name,
-                mavenId = ids.singleOrNull()?.mavenId,
-                version = ids.singleOrNull()?.version,
-            )
+            if (settings.disablePlugin(plugin.name)) {
+                KotlinPluginsNotificationBallon.notify(
+                    project = project,
+                    disabledPlugin = plugin.name,
+                    mavenId = ids.singleOrNull()?.mavenId,
+                    version = ids.singleOrNull()?.version,
+                )
+            }
         } else {
             // trigger editor notification across all Kotlin files
             project.service<KotlinPluginsNotifications>().activate(ids)
@@ -407,11 +407,6 @@ class KotlinPluginsExceptionReporterImpl(
 
                 processDiscovery(discovery, redrawUpdateUpdate)
             }
-        }
-
-        override fun reset() {
-            state.getAndSet(null)?.close()
-            stackTraceMap.clear()
         }
     }
 

@@ -103,7 +103,6 @@ class KotlinVersionMismatch(
 
 interface KotlinPluginDiscoveryUpdater {
     suspend fun discoveredSync(discovery: Discovery, redrawUpdateUpdate: Boolean = true)
-    fun reset()
 
     class Discovery(
         val pluginName: String,
@@ -231,8 +230,6 @@ class KotlinPluginsStorage(
             originalWatchKeys.values.forEach { it.key.cancel() }
             originalWatchKeys.clear()
             originalWatchKeysReverse.clear()
-
-            discoveryPublisher.reset()
 
             and()
         } finally {
