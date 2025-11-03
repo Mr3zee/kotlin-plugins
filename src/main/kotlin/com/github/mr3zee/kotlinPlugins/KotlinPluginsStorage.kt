@@ -107,7 +107,7 @@ class KotlinVersionMismatch(
 )
 
 interface KotlinPluginDiscoveryUpdater {
-    suspend fun discoveredSync(discovery: Discovery, redrawUpdateUpdate: Boolean = true)
+    suspend fun discoveredSync(discovery: Discovery, redrawAfterUpdate: Boolean)
 
     class Discovery(
         val pluginName: String,
@@ -143,7 +143,8 @@ suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
             checksum = checksum,
             isLocal = isLocal,
             kotlinVersionMismatch = kotlinVersionMismatch,
-        )
+        ),
+        redrawAfterUpdate = true,
     )
 }
 

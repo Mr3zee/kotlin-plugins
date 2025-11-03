@@ -207,7 +207,7 @@ class KotlinPluginsExceptionReporterImpl(
 
     private suspend fun processChunk(chunk: List<KotlinPluginDiscoveryUpdater.Discovery>) {
         chunk.forEach { discovery ->
-            discoveryHandler.discoveredSync(discovery, redrawUpdateUpdate = false)
+            discoveryHandler.discoveredSync(discovery, redrawAfterUpdate = false)
         }
 
         logger.debug("Finished processing chunk of ${chunk.size} jars: ${chunk.map { "${it.pluginName} (${it.mavenId})" }}")
@@ -386,7 +386,7 @@ class KotlinPluginsExceptionReporterImpl(
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
-        override suspend fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
+        override suspend fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawAfterUpdate: Boolean) {
             val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
 
             var new = false
@@ -405,7 +405,7 @@ class KotlinPluginsExceptionReporterImpl(
 
                 refreshNotifications()
 
-                processDiscovery(discovery, redrawUpdateUpdate)
+                processDiscovery(discovery, redrawAfterUpdate)
             }
         }
     }
