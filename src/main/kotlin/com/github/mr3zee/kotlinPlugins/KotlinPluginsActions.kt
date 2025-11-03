@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.openapi.util.NlsContexts
 import javax.swing.JComponent
 
 open class KotlinPluginsClearCachesAction : AnAction(AllIcons.Actions.ClearCash) {
@@ -51,7 +52,7 @@ private class ClearCachesDialog : DialogWrapper(true) {
 
     init {
         init()
-        title = "Clear Caches"
+        title = KotlinPluginsBundle.message("action.clearCaches.dialog.title")
     }
 
     override fun isResizable(): Boolean {
@@ -60,11 +61,11 @@ private class ClearCachesDialog : DialogWrapper(true) {
 
     override fun createCenterPanel(): JComponent = panel {
         row {
-            label("Are you sure you want to clear plugin caches?")
+            label(KotlinPluginsBundle.message("action.clearCaches.dialog.confirm"))
         }
 
         row {
-            checkBox("Don't ask again").applyToComponent {
+            checkBox(KotlinPluginsBundle.message("action.clearCaches.dialog.dontAsk")).applyToComponent {
                 addItemListener { dontAskAgain = isSelected }
             }
         }

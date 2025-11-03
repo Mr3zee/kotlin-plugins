@@ -8,6 +8,8 @@
     <vendor>Mr3zee</vendor>
     <category>Kotlin</category>
 
+    <resource-bundle>messages.KotlinPluginsBundle</resource-bundle>
+
     <depends>org.jetbrains.kotlin</depends>
     <depends>com.intellij.modules.platform</depends>
 
@@ -45,9 +47,9 @@
                 implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsEditorNotificationProvider"
         />
 
-        <notificationGroup id="Kotlin External FIR Support"
+        <notificationGroup id="kotlin.external.fir.support"
                            displayType="BALLOON"
-                           key="notification.kotlin.external.fir.support"/>
+                           key="notification.group.displayName"/>
 
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-core"
                            displayName="kotlinx-rpc"/>

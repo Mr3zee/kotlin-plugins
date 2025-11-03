@@ -115,20 +115,20 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
     private var rootPanel: JPanel? = null
 
-    override fun getDisplayName(): String = "Kotlin Plugins"
+    override fun getDisplayName(): String = KotlinPluginsBundle.message("configurable.displayName")
 
     override fun createComponent(): JComponent {
         if (rootPanel != null) return rootPanel as JPanel
 
         clearCachesCheckBox = JBCheckBox(
-            "Show confirmation dialog when clearing caches",
+            KotlinPluginsBundle.message("settings.clearCaches.showDialog"),
             local.showCacheClearConfirmationDialog,
         ).apply {
             addItemListener { local.showCacheClearConfirmationDialog = isSelected }
         }
 
         enableAnalyzerCheckBox = JBCheckBox(
-            "Enable Kotlin plugin exception analyzer",
+            KotlinPluginsBundle.message("settings.enableAnalyzer"),
             local.exceptionAnalyzerEnabled,
         ).apply {
             addItemListener {
@@ -138,7 +138,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         }
 
         autoDisablePluginsCheckBox = JBCheckBox(
-            "Automatically disable throwing plugins",
+            KotlinPluginsBundle.message("settings.autoDisable"),
             local.autoDiablePlugins,
         ).apply {
             isEnabled = enableAnalyzerCheckBox.isSelected
@@ -147,10 +147,14 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
 
         // Tables and models
         repoModel = ListTableModel(
-            object : com.intellij.util.ui.ColumnInfo<KotlinArtifactsRepository, String>("Name") {
+            object : com.intellij.util.ui.ColumnInfo<KotlinArtifactsRepository, String>(
+                KotlinPluginsBundle.message("table.repositories.column.name")
+            ) {
                 override fun valueOf(item: KotlinArtifactsRepository): String = item.name
             },
-            object : com.intellij.util.ui.ColumnInfo<KotlinArtifactsRepository, String>("Value") {
+            object : com.intellij.util.ui.ColumnInfo<KotlinArtifactsRepository, String>(
+                KotlinPluginsBundle.message("table.repositories.column.value")
+            ) {
                 override fun valueOf(item: KotlinArtifactsRepository): String = item.value
             }
         )
@@ -158,7 +162,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         repoTable = JBTable(repoModel).apply {
             columnModel.getColumn(0).preferredWidth = 100.scaled
             columnModel.getColumn(1).preferredWidth = 300.scaled
-            emptyText.text = "No repositories configured"
+            emptyText.text = KotlinPluginsBundle.message("table.repositories.empty")
             rowSorter = TableRowSorter(repoModel).apply {
                 setSortable(0, true)
                 setSortable(1, false)
@@ -179,18 +183,26 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                     local.pluginsEnabled[item.name] = value
                 }
             },
-            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Name") {
+            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>(
+                KotlinPluginsBundle.message("table.plugins.column.name")
+            ) {
                 override fun valueOf(item: KotlinPluginDescriptor): String = item.name
             },
-            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Coordinates") {
+            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>(
+                KotlinPluginsBundle.message("table.plugins.column.coordinates")
+            ) {
                 override fun valueOf(item: KotlinPluginDescriptor): String =
                     item.ids.joinToString("<br/>", prefix = "<html>", postfix = "</html>") { it.id }
             },
-            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Versions") {
+            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>(
+                KotlinPluginsBundle.message("table.plugins.column.versions")
+            ) {
                 override fun valueOf(item: KotlinPluginDescriptor): String =
                     PluginsDialog.versionMatchingMapReversed.getValue(item.versionMatching)
             },
-            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>("Repositories") {
+            object : com.intellij.util.ui.ColumnInfo<KotlinPluginDescriptor, String>(
+                KotlinPluginsBundle.message("table.plugins.column.repositories")
+            ) {
                 override fun valueOf(item: KotlinPluginDescriptor): String =
                     item.repositories.joinToString("<br/>", prefix = "<html>", postfix = "</html>") { it.name }
             }
@@ -202,7 +214,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
             columnModel.getColumn(2).preferredWidth = 300.scaled
             columnModel.getColumn(3).preferredWidth = 80.scaled
             columnModel.getColumn(4).preferredWidth = 150.scaled
-            emptyText.text = "No plugins configured"
+            emptyText.text = KotlinPluginsBundle.message("table.plugins.empty")
             rowSorter = TableRowSorter(pluginsModel).apply {
                 setSortable(0, false)
                 setSortable(1, true)
@@ -250,7 +262,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                         Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
 
                         JBPopupFactory.getInstance()
-                            .createBalloonBuilder(JBLabel("Version copied to clipboard"))
+                            .createBalloonBuilder(JBLabel(KotlinPluginsBundle.message("settings.version.copied")))
                             .createBalloon()
                             .show(
                                 RelativePoint.getSouthOf(e.inputEvent?.component as JComponent),
@@ -260,10 +272,11 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 }
 
                 actionButton(copyKotlinAction)
-                    .label("<html>Kotlin Compiler IDE version: <strong>$kotlinIdeVersion</strong></html>")
+                    // todo i18n: show kotlinIdeVersion in <strong> tag
+                    .label("<html>" + KotlinPluginsBundle.message("settings.kotlin.ide.version", kotlinIdeVersion) + "</html>")
             }
 
-            group("Exception Analyzer") {
+            group(KotlinPluginsBundle.message("group.exception.analyzer")) {
                 row {
                     cell(enableAnalyzerCheckBox)
                 }
@@ -275,7 +288,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 }
             }
 
-            group("Other") {
+            group(KotlinPluginsBundle.message("group.other")) {
                 row {
                     cell(clearCachesCheckBox)
                 }
@@ -287,13 +300,13 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         val artifactsContent = JPanel(BorderLayout())
         val artifactsForm = FormBuilder.createFormBuilder()
             .addLabeledComponent(
-                /* label = */ JBLabel("Maven repositories", AllIcons.Nodes.Folder, SwingConstants.LEADING),
+                /* label = */ JBLabel(KotlinPluginsBundle.message("label.maven.repositories"), AllIcons.Nodes.Folder, SwingConstants.LEADING),
                 /* component = */ repoPanel,
                 /* topInset = */ 5,
                 /* labelOnTop = */ true,
             )
             .addLabeledComponent(
-                /* label = */ JBLabel("Kotlin plugins", AllIcons.Nodes.Plugin, SwingConstants.LEADING),
+                /* label = */ JBLabel(KotlinPluginsBundle.message("label.kotlin.plugins"), AllIcons.Nodes.Plugin, SwingConstants.LEADING),
                 /* component = */ pluginsPanel,
                 /* topInset = */ 5,
                 /* labelOnTop = */ true,
@@ -302,8 +315,8 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
         artifactsContent.add(artifactsForm, BorderLayout.NORTH)
 
         val tabs = JBTabbedPane()
-        tabs.addTab("General", generalContent)
-        tabs.addTab("Artifacts", artifactsContent)
+        tabs.addTab(KotlinPluginsBundle.message("tab.general"), generalContent)
+        tabs.addTab(KotlinPluginsBundle.message("tab.artifacts"), artifactsContent)
         if (KotlinPluginsConfigurableUtil.selectArtifactsInitially) {
             tabs.selectedIndex = 1
             KotlinPluginsConfigurableUtil.selectArtifactsInitially = false
@@ -469,7 +482,7 @@ private class RepositoryDialog(
     private val isDefault = initial?.name in DefaultState.repositoryMap
 
     private val warningLabel = JBLabel(
-        "Default repository cannot be edited",
+        KotlinPluginsBundle.message("repository.default.cannot.edit"),
         AllIcons.General.Warning,
         SwingConstants.LEADING,
     ).apply {
@@ -479,27 +492,31 @@ private class RepositoryDialog(
     }
 
     private val nameField = JBTextField(initial?.name.orEmpty()).apply {
-        emptyText.text = "Unique name"
+        emptyText.text = KotlinPluginsBundle.message("emptyText.uniqueName")
 
         minimumSize = Dimension(300.scaled, minimumSize.height)
-        toolTipText = if (isDefault) "Default repository name cannot be edited" else "Name must be unique"
+        toolTipText = if (isDefault) {
+            KotlinPluginsBundle.message("tooltip.defaultRepoNameNotEditable")
+        } else {
+            KotlinPluginsBundle.message("tooltip.nameMustBeUnique")
+        }
     }
 
     private val urlField = JBTextField().apply {
-        emptyText.text = "Maven repository URL"
+        emptyText.text = KotlinPluginsBundle.message("repository.url.emptyText")
 
         text = if (initial?.value?.startsWith("http") == true) initial.value else ""
         minimumSize = Dimension(600.scaled, minimumSize.height)
 
         if (isDefault) {
-            toolTipText = "Default repository url cannot be edited"
+            toolTipText = KotlinPluginsBundle.message("tooltip.defaultRepoUrlNotEditable")
         }
     }
 
-    private val urlLabel = JBLabel("URL:")
+    private val urlLabel = JBLabel(KotlinPluginsBundle.message("label.url"))
 
     private val pathField = TextFieldWithBrowseButton().apply {
-        emptyText.text = "Maven artifacts directory"
+        emptyText.text = KotlinPluginsBundle.message("repository.path.emptyText")
 
         text = if (initial != null && !initial.value.startsWith("http")) initial.value else ""
         val descriptor = FileChooserDescriptorFactory
@@ -508,16 +525,20 @@ private class RepositoryDialog(
         addBrowseFolderListener(com.intellij.openapi.ui.TextBrowseFolderListener(descriptor, project))
 
         if (isDefault) {
-            toolTipText = "Default repository path cannot be edited"
+            toolTipText = KotlinPluginsBundle.message("tooltip.defaultRepoPathNotEditable")
         }
     }
-    private val pathLabel = JBLabel("Path:")
+    private val pathLabel = JBLabel(KotlinPluginsBundle.message("label.path"))
 
-    private val urlRadio = JBRadioButton("URL", initial?.value?.startsWith("http") ?: true)
-    private val pathRadio = JBRadioButton("File path", !(initial?.value?.startsWith("http") ?: false))
+    private val urlRadio = JBRadioButton(KotlinPluginsBundle.message("radio.url"), initial?.value?.startsWith("http") ?: true)
+    private val pathRadio = JBRadioButton(KotlinPluginsBundle.message("radio.filePath"), !(initial?.value?.startsWith("http") ?: false))
 
     init {
-        title = if (initial == null) "Add Maven Repository" else "Edit Maven Repository"
+        title = if (initial == null) {
+            KotlinPluginsBundle.message("dialog.repository.title.add")
+        } else {
+            KotlinPluginsBundle.message("dialog.repository.title.edit")
+        }
         nameField.isEditable = !isDefault
         urlField.isEditable = !isDefault
         pathField.isEditable = !isDefault
@@ -543,10 +564,10 @@ private class RepositoryDialog(
     override fun createCenterPanel(): JComponent {
         val form = FormBuilder.createFormBuilder()
             .addComponent(warningLabel)
-            .addLabeledComponent(JBLabel("Name:"), nameField)
+            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.name")), nameField)
             .apply {
                 if (!isDefault) {
-                    addLabeledComponent(JBLabel("Kind:"), JPanel().apply {
+                    addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.kind")), JPanel().apply {
                         layout = BoxLayout(this, BoxLayout.X_AXIS)
                         add(urlRadio)
                         add(Box.createHorizontalStrut(8))
@@ -564,39 +585,39 @@ private class RepositoryDialog(
     override fun doValidate(): ValidationInfo? {
         val name = nameField.text.trim()
         if (name.isEmpty()) {
-            return ValidationInfo("Name must not be empty", nameField)
+            return ValidationInfo(KotlinPluginsBundle.message("validation.name.empty"), nameField)
         }
 
         if (name in currentNames && name != initial?.name) {
-            return ValidationInfo("Name must be unique", nameField)
+            return ValidationInfo(KotlinPluginsBundle.message("validation.name.unique"), nameField)
         }
 
         if (name.contains(";")) {
-            return ValidationInfo("Name must not contain semicolons (';')", nameField)
+            return ValidationInfo(KotlinPluginsBundle.message("validation.name.noSemicolons"), nameField)
         }
 
         if (urlRadio.isSelected) {
             val url = urlField.text.trim()
             if (url.isEmpty()) {
-                return ValidationInfo("URL must not be empty", urlField)
+                return ValidationInfo(KotlinPluginsBundle.message("validation.url.empty"), urlField)
             }
 
             @Suppress("HttpUrlsUsage")
             if (!(url.startsWith("http://") || url.startsWith("https://"))) {
-                return ValidationInfo("URL should start with http:// or https://", urlField)
+                return ValidationInfo(KotlinPluginsBundle.message("validation.url.prefix"), urlField)
             }
 
             if (url.contains(";")) {
-                return ValidationInfo("URL must not contain semicolons (';')", urlField)
+                return ValidationInfo(KotlinPluginsBundle.message("validation.url.noSemicolons"), urlField)
             }
         } else {
             val path = pathField.text.trim()
             if (path.isEmpty()) {
-                return ValidationInfo("Path must not be empty", pathField)
+                return ValidationInfo(KotlinPluginsBundle.message("validation.path.empty"), pathField)
             }
 
             if (path.contains(";")) {
-                return ValidationInfo("Path must not contain semicolons (';')", pathField)
+                return ValidationInfo(KotlinPluginsBundle.message("validation.path.noSemicolons"), pathField)
             }
         }
 
@@ -626,7 +647,7 @@ private class PluginsDialog(
     private val isDefault = initial?.name in DefaultState.pluginMap
 
     private val warningLabel = JBLabel(
-        "Default plugin name and coordinates cannot be edited, default repositories cannot be removed",
+        KotlinPluginsBundle.message("plugin.default.cannot.edit"),
         AllIcons.General.Warning,
         SwingConstants.LEADING
     ).apply {
@@ -636,14 +657,14 @@ private class PluginsDialog(
     }
 
     private val nameField = JBTextField(initial?.name.orEmpty(), 30).apply {
-        emptyText.text = "Unique name"
+        emptyText.text = KotlinPluginsBundle.message("emptyText.uniqueName")
 
         minimumSize = Dimension(300.scaled, minimumSize.height)
 
         toolTipText = if (isDefault) {
-            "Default plugin name cannot be edited"
+            KotlinPluginsBundle.message("tooltip.defaultPluginNameNotEditable")
         } else {
-            "Name must be unique"
+            KotlinPluginsBundle.message("tooltip.nameMustBeUnique")
         }
     }
 
@@ -662,15 +683,15 @@ private class PluginsDialog(
     }
 
     private val idsTable = JBTable().apply {
-        emptyText.text = "No Maven coordinates"
+        emptyText.text = KotlinPluginsBundle.message("idsTable.empty")
 
         model = idsModel
 
         minimumSize = Dimension(600.scaled, minimumSize.height)
         toolTipText = if (isDefault) {
-            "Default plugin coordinates cannot be edited"
+            KotlinPluginsBundle.message("tooltip.defaultPluginCoordinatesNotEditable")
         } else {
-            "Each entry must be in the form of 'group:artifact'"
+            KotlinPluginsBundle.message("tooltip.coordinatesFormat")
         }
     }
 
@@ -706,14 +727,14 @@ private class PluginsDialog(
         }
     }
 
-    private val enabledCheckbox = JBCheckBox("Enable this plugin in the project", enabledInitial)
-    private val ignoreExceptionsCheckbox = JBCheckBox("Ignore plugin exceptions", initial?.ignoreExceptions ?: false)
+    private val enabledCheckbox = JBCheckBox(KotlinPluginsBundle.message("checkbox.enablePluginInProject"), enabledInitial)
+    private val ignoreExceptionsCheckbox = JBCheckBox(KotlinPluginsBundle.message("checkbox.ignorePluginExceptions"), initial?.ignoreExceptions ?: false)
 
     private val repoCheckboxes: List<JBCheckBox> = availableRepositories.map { repo ->
         JBCheckBox(repo.name, initial?.repositories?.any { it.name == repo.name } == true).apply {
             toolTipText = repo.value
             if (isDefault) {
-                toolTipText += " (Default plugin repository reference cannot be edited)"
+                toolTipText += " (" + KotlinPluginsBundle.message("tooltip.defaultPluginRepoRefNotEditable") + ")"
             }
             isEnabled = !isDefault || DefaultState.pluginMap[initial?.name]!!.repositories.none { it.name == repo.name }
         }
@@ -725,7 +746,11 @@ private class PluginsDialog(
     }
 
     init {
-        title = if (initial == null) "Add Plugin" else "Edit Plugin"
+        title = if (initial == null) {
+            KotlinPluginsBundle.message("dialog.plugin.title.add")
+        } else {
+            KotlinPluginsBundle.message("dialog.plugin.title.edit")
+        }
 
         nameField.isEditable = !isDefault
 
@@ -740,10 +765,10 @@ private class PluginsDialog(
 
         val form = FormBuilder.createFormBuilder()
             .addComponent(warningLabel)
-            .addLabeledComponent(JBLabel("Name:"), nameField)
-            .addLabeledComponent(JBLabel("Coordinates:"), tablePanel)
-            .addLabeledComponent(JBLabel("Version matching:"), versionMatchingField)
-            .addLabeledComponent(JBLabel("Repositories:"), reposPanel, 10.scaled)
+            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.name")), nameField)
+            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.coordinates")), tablePanel)
+            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.version.matching")), versionMatchingField)
+            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.repositories")), reposPanel, 10.scaled)
             .addComponent(enabledCheckbox)
             .addComponent(ignoreExceptionsCheckbox)
             .panel
@@ -755,29 +780,29 @@ private class PluginsDialog(
     override fun doValidate(): ValidationInfo? {
         val name = nameField.text.trim()
         if (name.isEmpty()) {
-            return ValidationInfo("Name must not be empty", nameField)
+            return ValidationInfo(KotlinPluginsBundle.message("validation.name.empty"), nameField)
         }
 
         if (name in currentNames && name != initial?.name) {
-            return ValidationInfo("Name must be unique", nameField)
+            return ValidationInfo(KotlinPluginsBundle.message("validation.name.unique"), nameField)
         }
 
         if (!pluginNameRegex.matches(name)) {
-            return ValidationInfo("Name must comply with ${pluginNameRegex.pattern}")
+            return ValidationInfo(KotlinPluginsBundle.message("validation.name.regex", pluginNameRegex.pattern))
         }
 
         if (mutableIds.isEmpty()) {
-            return ValidationInfo("At least one Maven coordinate must be specified")
+            return ValidationInfo(KotlinPluginsBundle.message("validation.maven.atLeastOne"))
         }
 
         mutableIds.forEach { id ->
             if (!mavenRegex.matches(id)) {
-                return ValidationInfo("Coordinates must be in the form group:artifact")
+                return ValidationInfo(KotlinPluginsBundle.message("validation.coordinates.format"))
             }
         }
 
         if (repoCheckboxes.none { it.isSelected }) {
-            return ValidationInfo("Select at least one URL repository")
+            return ValidationInfo(KotlinPluginsBundle.message("validation.select.repository"))
         }
 
         return null
@@ -785,9 +810,9 @@ private class PluginsDialog(
 
     companion object {
         private val versionMatchingMap = mapOf(
-            "Latest Available" to KotlinPluginDescriptor.VersionMatching.LATEST,
-            "Same Major" to KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
-            "Exact" to KotlinPluginDescriptor.VersionMatching.EXACT,
+            KotlinPluginsBundle.message("version.matching.latest") to KotlinPluginDescriptor.VersionMatching.LATEST,
+            KotlinPluginsBundle.message("version.matching.sameMajor") to KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
+            KotlinPluginsBundle.message("version.matching.exact") to KotlinPluginDescriptor.VersionMatching.EXACT,
         )
 
         val versionMatchingMapReversed = versionMatchingMap.entries

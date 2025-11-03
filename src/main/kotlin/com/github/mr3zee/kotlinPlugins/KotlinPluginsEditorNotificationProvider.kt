@@ -43,24 +43,33 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
         }
 
         return Function { editor ->
-            val panel = EditorNotificationPanel(editor,EditorNotificationPanel.Status.Error)
+            val panel = EditorNotificationPanel(editor, EditorNotificationPanel.Status.Error)
             val pluginWord = "plugin".pluralizeIf(grouped.size > 1)
             val beWord = if (grouped.size == 1) "is" else "are"
             val pluginsText = grouped.keys.joinToString(", ") { "'${it}'" }
 
-            panel.text = "Kotlin external compiler $pluginWord $pluginsText $beWord throwing exceptions."
+            panel.text = KotlinPluginsBundle.message(
+                "editor.notification.plugins.throwing",
+                pluginWord,
+                pluginsText,
+                beWord,
+            )
             panel.icon(KotlinPluginsIcons.Logo)
 
-            val disableSuffix = if (grouped.size == 1) "" else " all"
+            val disableLabel = if (grouped.size == 1) {
+                KotlinPluginsBundle.message("editor.notification.disable")
+            } else {
+                KotlinPluginsBundle.message("editor.notification.disable.all")
+            }
 
-            panel.createActionLabel("Disable$disableSuffix") {
+            panel.createActionLabel(disableLabel) {
                 val settings = project.service<KotlinPluginsSettings>()
                 settings.disablePlugins(pluginNames.map { it.pluginName })
 
                 cleanPanel()
             }
 
-            panel.createActionLabel("Auto-disable") {
+            panel.createActionLabel(KotlinPluginsBundle.message("editor.notification.autoDisable")) {
                 val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
                 analyzer.updateState(enabled = true, autoDisable = true)
 
@@ -70,7 +79,7 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
                 cleanPanel()
             }
 
-            panel.createActionLabel("Open diagnostics") {
+            panel.createActionLabel(KotlinPluginsBundle.message("editor.notification.openDiagnostics")) {
                 val pluginOrNull = grouped.keys.singleOrNull()
 
                 val jarIdOrNull = pluginOrNull?.let { grouped[it]?.singleOrNull() }

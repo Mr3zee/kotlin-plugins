@@ -103,8 +103,8 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         project: Project,
         toolWindow: ToolWindow,
     ) {
-        toolWindow.title = DISPLAY_NAME
-        toolWindow.stripeTitle = DISPLAY_NAME
+        toolWindow.title = KotlinPluginsBundle.message("toolwindow.displayName")
+        toolWindow.stripeTitle = KotlinPluginsBundle.message("toolwindow.displayName")
         toolWindow.isShowStripeButton = true
 
         val toolWindowPanel = SimpleToolWindowPanel(false, true)
@@ -125,7 +125,9 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         val overviewPanel = OverviewPanel(project, state, tree)
         tree.overviewPanel = overviewPanel
         val tabs = JBTabbedPane()
+        // todo i18n
         tabs.addTab("Overview", overviewPanel.overviewPanelComponent)
+        // todo i18n
         tabs.addTab("Logs", createLogPanel())
         splitter.secondComponent = tabs
 
@@ -157,7 +159,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         return JPanel().apply {
             layout = GridBagLayout()
 
-            val logNotice = GrayedLabel("Logs tab is WIP.")
+            val logNotice = GrayedLabel(KotlinPluginsBundle.message("logs.tab.notice"))
 
             vertical(logNotice)
         }
@@ -190,13 +192,21 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     private fun createDiagnosticsToolbar(tree: KotlinPluginsTree): ActionToolbar {
         val group = DefaultActionGroup()
 
-        group.add(object : AnAction("Expand All", "Expand all items", AllIcons.Actions.Expandall) {
+        group.add(object : AnAction(
+            KotlinPluginsBundle.message("toolbar.expandAll"),
+            KotlinPluginsBundle.message("toolbar.expandAll.description"),
+            AllIcons.Actions.Expandall
+        ) {
             override fun actionPerformed(e: AnActionEvent) {
                 tree.expandAll()
             }
         })
 
-        group.add(object : AnAction("Collapse All", "Collapse all items", AllIcons.Actions.Collapseall) {
+        group.add(object : AnAction(
+            KotlinPluginsBundle.message("toolbar.collapseAll"),
+            KotlinPluginsBundle.message("toolbar.collapseAll.description"),
+            AllIcons.Actions.Collapseall
+        ) {
             override fun actionPerformed(e: AnActionEvent) {
                 tree.collapseAll()
             }
@@ -206,20 +216,21 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         group.add(object : KotlinPluginsUpdateAction() {
             init {
-                templatePresentation.text = "Update"
+                templatePresentation.text = KotlinPluginsBundle.message("toolbar.update")
             }
         })
 
         group.add(object : KotlinPluginsRefreshAction() {
             init {
-                templatePresentation.text = "Refresh"
+                templatePresentation.text = KotlinPluginsBundle.message("toolbar.refresh")
             }
         })
 
         group.addSeparator()
 
         group.add(object : ToggleAction(
-            "Show Successful",
+            KotlinPluginsBundle.message("toolbar.showSucceeded"),
+            // todo i18n
             "Show items with 'Success' status",
             AllIcons.RunConfigurations.ShowPassed,
         ) {
@@ -235,7 +246,8 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         })
 
         group.add(object : ToggleAction(
-            "Show Skipped/Disabled",
+            KotlinPluginsBundle.message("toolbar.showSkipped"),
+            // todo i18n
             "Show items with 'Skipped/Disabled' status",
             AllIcons.RunConfigurations.ShowIgnored,
         ) {
@@ -254,7 +266,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         group.add(object : KotlinPluginsClearCachesAction() {
             init {
-                templatePresentation.text = "Clear Caches"
+                templatePresentation.text = KotlinPluginsBundle.message("action.clearCaches.dialog.title")
             }
         })
 
@@ -268,7 +280,6 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
     companion object {
         const val ID = "Kotlin Plugins Diagnostics"
-        const val DISPLAY_NAME = "Kotlin Plugins Diagnostics"
         const val PROPORTION_KEY = "KotlinPlugins.Proportion"
     }
 }
@@ -386,7 +397,7 @@ internal class OverviewPanel(
 
         when {
             plugin == null -> {
-                addRoot(GrayedLabel("Select a plugin to view details."), BorderLayout.CENTER)
+                addRoot(GrayedLabel(KotlinPluginsBundle.message("details.selectPlugin")), BorderLayout.CENTER)
                     .align(SwingConstants.CENTER)
             }
 
@@ -462,7 +473,7 @@ internal class OverviewPanel(
                                     var list: JComponent? = null
                                     row {
                                         list = jbList(
-                                            label = "Analyzed classes in jar:",
+                                            label = KotlinPluginsBundle.message("analyzed.classes.label"),
                                             icon = AllIcons.FileTypes.JavaClass,
                                             labelFont = { it.deriveFont(Font.BOLD) },
                                             model = model,
@@ -475,12 +486,12 @@ internal class OverviewPanel(
                                     }
 
                                     var placeholder: JLabel? = null
-                                    row { placeholder = grayed("Loading analyzed classes...").component }
+                                    row { placeholder = grayed(KotlinPluginsBundle.message("analyzed.classes.loading")).component }
 
                                     loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
                                         ApplicationManager.getApplication().invokeLater {
                                             if (names.isEmpty()) {
-                                                placeholder?.text = "No analyzed classes found"
+                                                placeholder?.text = KotlinPluginsBundle.message("analyzed.classes.none")
                                                 list?.isVisible = false
                                             } else {
                                                 placeholder?.isVisible = false
@@ -496,9 +507,9 @@ internal class OverviewPanel(
                             }
                         } else {
                             addRoot(mainPanel { GridBagLayout() }).apply {
-                                val label = GrayedLabel("Analysis for classes in a jar is disabled.")
+                                val label = GrayedLabel(KotlinPluginsBundle.message("jar.analysis.disabled"))
 
-                                val actionLink = ActionLink("Open Settings") {
+                                val actionLink = ActionLink(KotlinPluginsBundle.message("link.openSettings")) {
                                     KotlinPluginsConfigurableUtil.showGeneral(project)
                                 }
 
@@ -510,7 +521,7 @@ internal class OverviewPanel(
                     is ArtifactStatus.FailedToLoad -> {
                         val sanitizedMessage = project.service<KotlinPluginsStorage>()
                             .getFailureMessageFor(plugin, mavenId, version)
-                            ?: "Failed to load with unknown reason. <br/>Please check the log for details."
+                            ?: KotlinPluginsBundle.message("error.unknown.reason")
 
                         addRootPanel(
                             customiseComponent = {
@@ -523,7 +534,7 @@ internal class OverviewPanel(
                             var area: Cell<JBTextArea>? = null
                             row {
                                 area = textArea()
-                                    .label("Failed to load this jar:", LabelPosition.TOP)
+                                    .label(KotlinPluginsBundle.message("jar.load.failed.title"), LabelPosition.TOP)
                                     .align(AlignX.FILL)
                                     .rows(10)
                                     .applyToComponent {
@@ -535,7 +546,7 @@ internal class OverviewPanel(
                             }
 
                             row {
-                                checkBox("Soft wrap").applyToComponent {
+                                checkBox(KotlinPluginsBundle.message("label.softWrap")).applyToComponent {
                                     isSelected = state.softWrapErrorMessages
 
                                     addActionListener {
@@ -572,9 +583,9 @@ internal class OverviewPanel(
         version: String? = null,
     ): ActionLink {
         return if (isFile) {
-            ActionLink("Show in cache directory") { revealFor(plugin, mavenId, version) }
+            ActionLink(KotlinPluginsBundle.message("link.showInCacheDir")) { revealFor(plugin, mavenId, version) }
         } else {
-            ActionLink("Show cache directory") { revealFor(plugin, mavenId, version) }
+            ActionLink(KotlinPluginsBundle.message("link.showCacheDir")) { revealFor(plugin, mavenId, version) }
         }.apply {
             icon = AllIcons.General.OpenDisk
         }
@@ -630,7 +641,7 @@ internal class OverviewPanel(
 
     private fun selectVersionPanel(): JPanel {
         return mainPanel { GridBagLayout() }.apply {
-            val grayedLabel = GrayedLabel("Select a version to see details.")
+            val grayedLabel = GrayedLabel(KotlinPluginsBundle.message("versions.select"))
 
             vertical(grayedLabel)
         }
@@ -638,7 +649,7 @@ internal class OverviewPanel(
 
     private fun inProgressPanel(type: NodeType): JPanel {
         return mainPanel { GridBagLayout() }.apply {
-            val text = GrayedLabel("Panel will display info when ${type.displayLowerCaseName} is loaded.")
+            val text = GrayedLabel(KotlinPluginsBundle.message("panel.display.when.loaded", type.displayLowerCaseName))
 
             vertical(text)
         }
@@ -646,8 +657,8 @@ internal class OverviewPanel(
 
     private fun skippedPanel(type: NodeType): JPanel {
         return mainPanel { GridBagLayout() }.apply {
-            val text = GrayedLabel("This ${type.displayLowerCaseName} is not yet requested in project.")
-            val description = GrayedLabel("Resolution is lazy and it might be requested later.")
+            val text = GrayedLabel(KotlinPluginsBundle.message("panel.not.requested", type.displayLowerCaseName))
+            val description = GrayedLabel(KotlinPluginsBundle.message("panel.resolution.lazy"))
 
             vertical(text, description)
         }
@@ -655,13 +666,13 @@ internal class OverviewPanel(
 
     private fun disabledPanel(type: NodeType, pluginName: String): JPanel {
         return mainPanel { GridBagLayout() }.apply {
-            val enableLink = ActionLink("Enable this ${type.displayLowerCaseName}") {
+            val enableLink = ActionLink(KotlinPluginsBundle.message("link.enableType", type.displayLowerCaseName)) {
                 project.service<KotlinPluginsSettings>().enablePlugin(pluginName)
             }
 
-            val orLabel = GrayedLabel("Or")
+            val orLabel = GrayedLabel(KotlinPluginsBundle.message("label.or"))
 
-            val settingsLink = ActionLink("Open the Settings") {
+            val settingsLink = ActionLink(KotlinPluginsBundle.message("link.openTheSettings")) {
                 KotlinPluginsConfigurableUtil.showArtifacts(project)
             }
 
@@ -672,11 +683,14 @@ internal class OverviewPanel(
     private fun partialSuccessPanel(type: NodeType): JPanel {
         return mainPanel { GridBagLayout() }.apply {
             val text = GrayedLabel(
-                "This ${type.displayLowerCaseName} was loaded successfully, but some other parts of the plugin were not."
+                KotlinPluginsBundle.message(
+                    "partial.success.header",
+                    type.displayLowerCaseName,
+                )
             )
 
             val description = GrayedLabel(
-                "The whole plugin will be skipped until all other parts are loaded."
+                KotlinPluginsBundle.message("partial.success.description")
             )
 
             vertical(text, description)
@@ -732,6 +746,7 @@ internal class OverviewPanel(
             offset += toAppend.length
         }
         if (lines.size > limit) {
+            // todo i18n
             val footer = "\n\u2026 truncated ${lines.size - limit} more lines"
             sb.append(footer)
         }
@@ -751,7 +766,8 @@ internal class OverviewPanel(
 
         if (status is ArtifactStatus.ExceptionInRuntime && report != null) {
             row {
-                label("Exception(s) occurred in runtime")
+                label(KotlinPluginsBundle.message("exceptions.runtime.title"))
+                    // todo i18n
                     .comment(
                         """
                             A compiler plugin must never throw an exception<br/>
@@ -762,7 +778,7 @@ internal class OverviewPanel(
 
             if (project.service<KotlinPluginsSettings>().isEnabled(plugin)) {
                 row {
-                    cell(ActionLink("Disable this plugin") {
+                    cell(ActionLink(KotlinPluginsBundle.message("link.disableThisPlugin")) {
                         project.service<KotlinPluginsNotifications>().deactivate(plugin)
                         ApplicationManager.getApplication().invokeLater {
                             EditorNotifications.getInstance(project).updateAllNotifications()
@@ -772,7 +788,7 @@ internal class OverviewPanel(
                             .disablePlugin(plugin)
                     })
 
-                    cell(ActionLink("Auto-disable") {
+                    cell(ActionLink(KotlinPluginsBundle.message("editor.notification.autoDisable")) {
                         project.service<KotlinPluginsNotifications>().deactivate(plugin)
                         ApplicationManager.getApplication().invokeLater {
                             EditorNotifications.getInstance(project).updateAllNotifications()
@@ -794,7 +810,7 @@ internal class OverviewPanel(
             }
 
             row {
-                button("Create Failure Report") {
+                button(KotlinPluginsBundle.message("button.createFailureReport")) {
                     // todo
                 }
             }
@@ -871,7 +887,8 @@ internal class OverviewPanel(
             separator()
         } else if (status == ArtifactStatus.ExceptionInRuntime && report == null) {
             row {
-                label("Failed to show exceptions.")
+                label(KotlinPluginsBundle.message("exceptions.show.failed"))
+                    // todo i18n
                     .comment("This is probably due to a bug in our IntelliJ plugin.")
             }
 
@@ -1056,6 +1073,7 @@ private class NodeData(
                     } else {
                         addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                         addText(
+                            // todo i18n
                             " ${status.criteria.toUi()}, Requested: ${status.requestedVersion}",
                             SimpleTextAttributes.GRAYED_ATTRIBUTES
                         )
@@ -1536,6 +1554,7 @@ enum class NodeType {
     Plugin, Artifact, Version;
 }
 
+// todo i18n
 private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type) {
     NodeType.Plugin -> when (status) {
         is ArtifactStatus.Success -> "All plugin artifacts are loaded successfully"
@@ -1606,6 +1625,7 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
     return ArtifactStatus.Skipped
 }
 
+// todo i18n
 private fun KotlinPluginDescriptor.VersionMatching.toUi(): String {
     return when (this) {
         KotlinPluginDescriptor.VersionMatching.EXACT -> "Exact"
@@ -1691,6 +1711,7 @@ private val MonospacedFont by lazy {
     JBFont.create(Font.getFont(attributes)).deriveFont(Font.PLAIN, 13.0f)
 }
 
+// todo i18n
 private val NodeType.displayLowerCaseName
     get() = when (this) {
         NodeType.Plugin -> "plugin"
@@ -1700,6 +1721,7 @@ private val NodeType.displayLowerCaseName
 
 internal val Int.scaled get() = JBUI.scale(this)
 
+// todo i18n
 private fun ExceptionsReport.hint(): String {
     val exceptionsAnalysis = when {
         kotlinVersionMismatch != null && isProbablyIncompatible -> {

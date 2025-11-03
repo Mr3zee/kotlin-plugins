@@ -14,14 +14,17 @@ object KotlinPluginsNotificationBallon {
         version: String?,
     ) {
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("Kotlin External FIR Support")
+            .getNotificationGroup("kotlin.external.fir.support")
             .createNotification(
                 type = NotificationType.WARNING,
-                content = """
-                    Kotlin compiler plugin '${disabledPlugin}' has encountered an error and has been auto-disabled.
-                """.trimIndent(),
+                content = KotlinPluginsBundle.message(
+                    "notification.plugin.autoDisabled",
+                    disabledPlugin,
+                ),
             )
-            .addAction(object : com.intellij.notification.NotificationAction("Open diagnostics") {
+            .addAction(object : com.intellij.notification.NotificationAction(
+                KotlinPluginsBundle.message("editor.notification.openDiagnostics")
+            ) {
                 override fun actionPerformed(
                     e: AnActionEvent,
                     notification: Notification,
