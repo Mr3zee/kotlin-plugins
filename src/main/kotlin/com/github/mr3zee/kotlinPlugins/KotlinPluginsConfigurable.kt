@@ -272,8 +272,7 @@ class KotlinPluginsConfigurable(private val project: Project) : Configurable {
                 }
 
                 actionButton(copyKotlinAction)
-                    // todo i18n: show kotlinIdeVersion in <strong> tag
-                    .label("<html>" + KotlinPluginsBundle.message("settings.kotlin.ide.version", kotlinIdeVersion) + "</html>")
+                    .label(KotlinPluginsBundle.message("settings.kotlin.ide.version", kotlinIdeVersion))
             }
 
             group(KotlinPluginsBundle.message("group.exception.analyzer")) {

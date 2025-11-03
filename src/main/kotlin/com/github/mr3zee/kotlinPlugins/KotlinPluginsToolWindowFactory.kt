@@ -35,6 +35,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.NlsContext
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
@@ -125,10 +126,8 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
         val overviewPanel = OverviewPanel(project, state, tree)
         tree.overviewPanel = overviewPanel
         val tabs = JBTabbedPane()
-        // todo i18n
-        tabs.addTab("Overview", overviewPanel.overviewPanelComponent)
-        // todo i18n
-        tabs.addTab("Logs", createLogPanel())
+        tabs.addTab(KotlinPluginsBundle.message("tab.overview"), overviewPanel.overviewPanelComponent)
+        tabs.addTab(KotlinPluginsBundle.message("tab.logs"), createLogPanel())
         splitter.secondComponent = tabs
 
         // Tree selection -> state + overview refresh
@@ -230,8 +229,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         group.add(object : ToggleAction(
             KotlinPluginsBundle.message("toolbar.showSucceeded"),
-            // todo i18n
-            "Show items with 'Success' status",
+            KotlinPluginsBundle.message("toolbar.showSucceeded.description"),
             AllIcons.RunConfigurations.ShowPassed,
         ) {
             override fun getActionUpdateThread(): ActionUpdateThread {
@@ -247,8 +245,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
 
         group.add(object : ToggleAction(
             KotlinPluginsBundle.message("toolbar.showSkipped"),
-            // todo i18n
-            "Show items with 'Skipped/Disabled' status",
+            KotlinPluginsBundle.message("toolbar.showSkipped.description"),
             AllIcons.RunConfigurations.ShowIgnored,
         ) {
             override fun getActionUpdateThread(): ActionUpdateThread {
@@ -486,7 +483,10 @@ internal class OverviewPanel(
                                     }
 
                                     var placeholder: JLabel? = null
-                                    row { placeholder = grayed(KotlinPluginsBundle.message("analyzed.classes.loading")).component }
+                                    row {
+                                        placeholder =
+                                            grayed(KotlinPluginsBundle.message("analyzed.classes.loading")).component
+                                    }
 
                                     loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
                                         ApplicationManager.getApplication().invokeLater {
@@ -746,8 +746,7 @@ internal class OverviewPanel(
             offset += toAppend.length
         }
         if (lines.size > limit) {
-            // todo i18n
-            val footer = "\n\u2026 truncated ${lines.size - limit} more lines"
+            val footer = "\n" + KotlinPluginsBundle.message("stacktrace.truncated", lines.size - limit)
             sb.append(footer)
         }
         return sb.toString() to ranges
@@ -767,13 +766,7 @@ internal class OverviewPanel(
         if (status is ArtifactStatus.ExceptionInRuntime && report != null) {
             row {
                 label(KotlinPluginsBundle.message("exceptions.runtime.title"))
-                    // todo i18n
-                    .comment(
-                        """
-                            A compiler plugin must never throw an exception<br/>
-                            Instead it must report errors using diagnostics<br/>
-                        """.trimIndent()
-                    )
+                    .comment(KotlinPluginsBundle.message("exceptions.runtime.tipHtml"))
             }
 
             if (project.service<KotlinPluginsSettings>().isEnabled(plugin)) {
@@ -824,7 +817,12 @@ internal class OverviewPanel(
             val exceptionPanes = mutableListOf<Pair<ExceptionEditorTextField, Throwable>>()
             exceptionsPanel.add(com.intellij.ui.dsl.builder.panel {
                 report.exceptions.forEachIndexed { index, ex ->
-                    val groupTitle = "#${index + 1}: ${ex::class.java.name}: ${ex.message ?: ""}"
+                    val groupTitle = KotlinPluginsBundle.message(
+                        "exception.group.title",
+                        index + 1,
+                        ex::class.java.name,
+                        ex.message ?: ""
+                    )
                     var editorField: ExceptionEditorTextField? = null
                     val group = collapsibleGroup(groupTitle) {
                         val (text, _) = exceptionTextAndHighlights(ex, emptySet())
@@ -855,7 +853,7 @@ internal class OverviewPanel(
                     }
 
                     fun updateTitle() {
-                        setEllipsized(this@OverviewPanel.overviewPanelComponent, labelFont, groupTitle) {
+                        setEllipsis(this@OverviewPanel.overviewPanelComponent, labelFont, groupTitle) {
                             group.setTitle(it)
                         }
                     }
@@ -888,8 +886,7 @@ internal class OverviewPanel(
         } else if (status == ArtifactStatus.ExceptionInRuntime && report == null) {
             row {
                 label(KotlinPluginsBundle.message("exceptions.show.failed"))
-                    // todo i18n
-                    .comment("This is probably due to a bug in our IntelliJ plugin.")
+                    .comment(KotlinPluginsBundle.message("exceptions.show.failed.tip"))
             }
 
             separator()
@@ -996,7 +993,12 @@ internal class OverviewPanel(
         state.removeOnSelectedState(::render)
     }
 
-    private fun setEllipsized(component: JComponent, font: Font, full: String, setText: (String) -> Unit) {
+    private fun setEllipsis(
+        component: JComponent,
+        font: Font,
+        @NlsContexts.Label full: String,
+        setText: (String) -> Unit,
+    ) {
         val insets = component.insets
         val max = component.width - insets.left - insets.right
         if (max <= 0) {
@@ -1073,8 +1075,11 @@ private class NodeData(
                     } else {
                         addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                         addText(
-                            // todo i18n
-                            " ${status.criteria.toUi()}, Requested: ${status.requestedVersion}",
+                            " " + KotlinPluginsBundle.message(
+                                "tree.version.grayText",
+                                status.criteria.toUi(),
+                                status.requestedVersion,
+                            ),
                             SimpleTextAttributes.GRAYED_ATTRIBUTES
                         )
                     }
@@ -1554,46 +1559,47 @@ enum class NodeType {
     Plugin, Artifact, Version;
 }
 
-// todo i18n
 private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type) {
     NodeType.Plugin -> when (status) {
-        is ArtifactStatus.Success -> "All plugin artifacts are loaded successfully"
-        is ArtifactStatus.PartialSuccess -> "Some plugin parts failed to load"
-        ArtifactStatus.InProgress -> "Plugin is loading/refreshing"
-        is ArtifactStatus.FailedToLoad -> "Plugin failed to load at least one artifact"
-        ArtifactStatus.ExceptionInRuntime -> "Plugin threw an exception during runtime"
-        ArtifactStatus.Disabled -> "Plugin is disabled in settings"
-        ArtifactStatus.Skipped -> "Plugin is not requested in the project yet"
+        is ArtifactStatus.Success -> KotlinPluginsBundle.message("tooltip.plugin.success")
+        is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.plugin.partial")
+        ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.plugin.inProgress")
+        is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.plugin.failed")
+        ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.plugin.exception")
+        ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.plugin.disabled")
+        ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.plugin.skipped")
     }
 
     NodeType.Artifact -> when (status) {
-        is ArtifactStatus.Success -> "Artifact loaded successfully"
-        is ArtifactStatus.PartialSuccess -> "Some plugin parts failed to load"
-        ArtifactStatus.InProgress -> "Artifact is loading/refreshing"
-        is ArtifactStatus.FailedToLoad -> "Artifact failed to load"
-        ArtifactStatus.ExceptionInRuntime -> "Artifact threw an exception during runtime"
-        ArtifactStatus.Disabled -> "Artifact is disabled in settings"
-        ArtifactStatus.Skipped -> "Artifact is not requested in the project yet"
+        is ArtifactStatus.Success -> KotlinPluginsBundle.message("tooltip.artifact.success")
+        is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.artifact.partial")
+        ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.artifact.inProgress")
+        is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.artifact.failed")
+        ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.artifact.exception")
+        ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.artifact.disabled")
+        ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.artifact.skipped")
     }
 
     NodeType.Version -> when (status) {
         is ArtifactStatus.Success -> {
             if (status.actualVersion == status.requestedVersion) {
-                "Requested version loaded successfully"
+                KotlinPluginsBundle.message("tooltip.version.success.exact")
             } else {
-                "<html>Version loaded successfully. <br/>" +
-                        "Requested ${status.requestedVersion}, " +
-                        "actual is ${status.actualVersion}, " +
-                        "criteria: ${status.criteria}</html>"
+                KotlinPluginsBundle.message(
+                    "tooltip.version.success.mismatch",
+                    status.requestedVersion,
+                    status.actualVersion,
+                    status.criteria,
+                )
             }
         }
 
-        is ArtifactStatus.PartialSuccess -> "Some plugin parts failed to load"
-        ArtifactStatus.InProgress -> "Version is loading/refreshing"
-        is ArtifactStatus.FailedToLoad -> "Version failed to load: ${status.shortMessage}"
-        ArtifactStatus.ExceptionInRuntime -> "Version threw an exception during runtime"
-        ArtifactStatus.Disabled -> "Version is disabled in settings"
-        ArtifactStatus.Skipped -> "Version is not requested in the project yet"
+        is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.version.partial")
+        ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.version.inProgress")
+        is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.version.failed", status.shortMessage)
+        ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.version.exception")
+        ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.version.disabled")
+        ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.version.skipped")
     }
 }
 
@@ -1625,12 +1631,11 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
     return ArtifactStatus.Skipped
 }
 
-// todo i18n
 private fun KotlinPluginDescriptor.VersionMatching.toUi(): String {
     return when (this) {
-        KotlinPluginDescriptor.VersionMatching.EXACT -> "Exact"
-        KotlinPluginDescriptor.VersionMatching.SAME_MAJOR -> "Same Major"
-        KotlinPluginDescriptor.VersionMatching.LATEST -> "Latest"
+        KotlinPluginDescriptor.VersionMatching.EXACT -> KotlinPluginsBundle.message("version.matching.exact")
+        KotlinPluginDescriptor.VersionMatching.SAME_MAJOR -> KotlinPluginsBundle.message("version.matching.sameMajor")
+        KotlinPluginDescriptor.VersionMatching.LATEST -> KotlinPluginsBundle.message("version.matching.latest")
     }
 }
 
@@ -1711,109 +1716,58 @@ private val MonospacedFont by lazy {
     JBFont.create(Font.getFont(attributes)).deriveFont(Font.PLAIN, 13.0f)
 }
 
-// todo i18n
 private val NodeType.displayLowerCaseName
     get() = when (this) {
-        NodeType.Plugin -> "plugin"
-        NodeType.Artifact -> "artifact"
-        NodeType.Version -> "version"
+        NodeType.Plugin -> KotlinPluginsBundle.message("nodeType.plugin")
+        NodeType.Artifact -> KotlinPluginsBundle.message("nodeType.artifact")
+        NodeType.Version -> KotlinPluginsBundle.message("nodeType.version")
     }
 
 internal val Int.scaled get() = JBUI.scale(this)
 
-// todo i18n
 private fun ExceptionsReport.hint(): String {
-    val exceptionsAnalysis = when {
-        kotlinVersionMismatch != null && isProbablyIncompatible -> {
-            """
-                <strong>Exceptions Analysis</strong><br/>
-                <br/>
-                The version of the plugin is not compatible with the version of the IDE.<br/>
-                This may be the cause for the exceptions thrown.<br/>
-                Compiler API is not binary compatible between Kotlin versions.<br/>
-                <br/>
-                Indicated Kotlin version in the jar: ${kotlinVersionMismatch.jarVersion}<br/>
-                In IDE Kotlin version: ${kotlinVersionMismatch.ideVersion}<br/>
-                <br/>
-            """.trimIndent()
-        }
+    val analysis = when {
+        kotlinVersionMismatch != null && isProbablyIncompatible ->
+            KotlinPluginsBundle.message("exceptions.analysis.header") +
+                    KotlinPluginsBundle.message(
+                        "exceptions.analysis.incompatibility.body",
+                        kotlinVersionMismatch.jarVersion,
+                        kotlinVersionMismatch.ideVersion,
+                    )
 
         isProbablyIncompatible -> {
-            val kotlinIdeVersion = service<KotlinVersionService>()
-                .getKotlinIdePluginVersion()
-
-            """
-                <strong>Exceptions Analysis</strong><br/>
-                <br/>
-                Exceptions thrown are likely to be the sign of a binary incompatibility
-                between the Kotlin version of the IDE and the Kotlin version of the plugin.<br/>
-                The plugin indicates that the Kotlin version match, however this might not be the case.<br/>
-                <br/>
-                In IDE Kotlin version: $kotlinIdeVersion<br/>
-                <br/>
-            """.trimIndent()
+            val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+            KotlinPluginsBundle.message("exceptions.analysis.header") +
+                    KotlinPluginsBundle.message(
+                        "exceptions.analysis.probablyIncompatible.body",
+                        kotlinIdeVersion,
+                    )
         }
 
         else -> ""
     }
 
-    val actionSuggestion = when {
-        reloadedSame && isLocal -> {
-            """
-                <strong>Action suggestion</strong><br/>
-                <br/>
-                The jar was loaded from a local source 
-                and was reloaded at least once with the same content so the exception persists 
-                (for example, during a manual or a background update).<br/>
-                If you are developing the plugin, try changing its logic 
-                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
-            """.trimIndent()
-        }
+    val action = when {
+        reloadedSame && isLocal -> KotlinPluginsBundle.message("exceptions.action.header") +
+                KotlinPluginsBundle.message("exceptions.action.local.reloaded.body")
 
-        isLocal -> {
-            """
-                <strong>Action suggestion</strong><br/>
-                <br/>
-                The jar was loaded from a local source.<br/>
-                If you are developing the plugin, try changing its logic 
-                and republishing it locally to the same place. It will be updated automatically in IDE.<br/>
-            """.trimIndent()
-        }
+        isLocal -> KotlinPluginsBundle.message("exceptions.action.header") +
+                KotlinPluginsBundle.message("exceptions.action.local.body")
 
-        reloadedSame -> {
-            """
-                <strong>Action suggestion</strong><br/>
-                <br/>
-                The jar was loaded from a remote source 
-                and was reloaded at least once with the same content so the exception persists 
-                (for example, during a manual or a background update).<br/>
-                If you are developing the plugin, try changing its logic 
-                and republishing it to the same place and run 'Update' action<br/>
-            """.trimIndent()
-        }
+        reloadedSame -> KotlinPluginsBundle.message("exceptions.action.header") +
+                KotlinPluginsBundle.message("exceptions.action.remote.reloaded.body")
 
-        kotlinVersionMismatch != null -> {
-            """
-                <strong>Action suggestion</strong><br/>
-                <br/>
-                The jar was loaded unsafely, using a fallback without the compatibilities guarantee.<br/>
-                If you are developing the plugin, try publishing it with the same Kotlin version as the IDE.<br/>
-                If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
-            """.trimIndent()
-        }
+        kotlinVersionMismatch != null -> KotlinPluginsBundle.message("exceptions.action.header") +
+                KotlinPluginsBundle.message("exceptions.action.kotlinVersionMismatch.body")
 
-        else -> """
-            <strong>Action suggestion</strong><br/>
-            <br/>
-            If you are developing the plugin - you need to check the exceptions and replace them with diagnostics.<br/>
-            If you are not the developer - you can report this problem to the plugin author using the button below.<br/>
-        """.trimIndent()
+        else -> KotlinPluginsBundle.message("exceptions.action.header") +
+                KotlinPluginsBundle.message("exceptions.action.default.body")
     }
 
     return """
         |<html>
-        |$exceptionsAnalysis
-        |$actionSuggestion
+        |$analysis
+        |$action
         |</html>
     """.trimMargin()
 }
