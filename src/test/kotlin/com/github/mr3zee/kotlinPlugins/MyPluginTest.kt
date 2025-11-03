@@ -185,7 +185,7 @@ class MyPluginTest : BasePlatformTestCase() {
         )
     }
 
-    fun testJarAnalyzer() {
+    fun testJarAnalyzer() = runBlocking {
         // kotlinx-rpc-compiler-plugin-backend-2.2.0-ij251-78-0.10.0.jar
         val k2FqNames = loadAndAnalyzeJar("kotlinx-rpc-compiler-plugin-k2-2.2.0-ij251-78-0.10.0.jar")
 
@@ -304,7 +304,7 @@ class MyPluginTest : BasePlatformTestCase() {
         assertSameElements(matched, listOf("2", "3"))
     }
 
-    private fun loadAndAnalyzeJar(name: String): Set<String> {
+    private suspend fun loadAndAnalyzeJar(name: String): Set<String> {
         val jarUrl = MyPluginTest::class.java.getResource("/$name")
             ?: error("Failed to load jar")
 
