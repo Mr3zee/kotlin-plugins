@@ -187,7 +187,7 @@ class KotlinPluginsExceptionReporterImpl(
     }
 
     private fun initializationState() = scope.launch(
-        context = Dispatchers.IO + CoroutineName("KotlinPluginsExceptionReporterImpl.start"),
+        context = CoroutineName("KotlinPluginsExceptionReporterImpl.start"),
         start = CoroutineStart.LAZY,
     ) {
         val jars = project.service<KotlinPluginsStorage>().requestJars()
@@ -205,7 +205,7 @@ class KotlinPluginsExceptionReporterImpl(
         logger.debug("Finished initial processing of all jars")
     }.let(::State)
 
-    private fun processChunk(chunk: List<KotlinPluginDiscoveryUpdater.Discovery>) {
+    private suspend fun processChunk(chunk: List<KotlinPluginDiscoveryUpdater.Discovery>) {
         chunk.forEach { discovery ->
             discoveryHandler.discoveredSync(discovery, redrawUpdateUpdate = false)
         }
@@ -239,7 +239,7 @@ class KotlinPluginsExceptionReporterImpl(
         }
     }
 
-    private fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
+    private suspend fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
         val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
         stackTraceMap.remove(jarId)
 
@@ -386,7 +386,7 @@ class KotlinPluginsExceptionReporterImpl(
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
-        override fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
+        override suspend fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
             val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
 
             var new = false

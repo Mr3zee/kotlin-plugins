@@ -1,5 +1,7 @@
 package com.github.mr3zee.kotlinPlugins
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.jar.JarFile
@@ -17,7 +19,7 @@ sealed interface KotlinPluginsAnalyzedJar {
  * - Duplicates (e.g., from multi-release JARs) are deduplicated.
  */
 object KotlinPluginsJarAnalyzer {
-    fun analyze(jar: Path): KotlinPluginsAnalyzedJar {
+    suspend fun analyze(jar: Path): KotlinPluginsAnalyzedJar {
         return try {
             doAnalyze(jar)
         } catch (e: Exception) {
@@ -25,9 +27,9 @@ object KotlinPluginsJarAnalyzer {
         }
     }
 
-    private fun doAnalyze(jar: Path): KotlinPluginsAnalyzedJar {
+    private suspend fun doAnalyze(jar: Path): KotlinPluginsAnalyzedJar = withContext(Dispatchers.IO) {
         if (!Files.exists(jar) || !Files.isRegularFile(jar)) {
-            return KotlinPluginsAnalyzedJar.Failure("File does not exist or is not a regular file: $jar")
+            return@withContext KotlinPluginsAnalyzedJar.Failure("File does not exist or is not a regular file: $jar")
         }
 
         JarFile(jar.toFile()).use { jarFile ->
@@ -71,7 +73,7 @@ object KotlinPluginsJarAnalyzer {
                 result.add(fqn)
             }
 
-            return KotlinPluginsAnalyzedJar.Success(result)
+            KotlinPluginsAnalyzedJar.Success(result)
         }
     }
 

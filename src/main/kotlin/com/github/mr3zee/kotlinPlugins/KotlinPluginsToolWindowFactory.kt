@@ -536,6 +536,8 @@ internal class OverviewPanel(
 
                             row {
                                 checkBox("Soft wrap").applyToComponent {
+                                    isSelected = state.softWrapErrorMessages
+
                                     addActionListener {
                                         state.softWrapErrorMessages = isSelected
                                         area?.component?.lineWrap = isSelected
@@ -892,7 +894,6 @@ internal class OverviewPanel(
         }
     }
 
-    @Suppress("JComponentDataProvider")
     private class ExceptionEditorTextField(
         text: String,
         project: Project,
@@ -1080,7 +1081,7 @@ class KotlinPluginsTreeState : BaseState() {
     var selectedNodeKey: String? by string(null)
 
     var showClearCachesDialog: Boolean by property(true)
-    var softWrapErrorMessages: Boolean by property(false)
+    var softWrapErrorMessages: Boolean by property(true)
 
     companion object {
         fun getInstance(project: Project): KotlinPluginsTreeState =
@@ -1596,6 +1597,10 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
 
     if (children.any { it.status == ArtifactStatus.ExceptionInRuntime }) {
         return ArtifactStatus.ExceptionInRuntime
+    }
+
+    if (children.any { it.status == ArtifactStatus.PartialSuccess}) {
+        return ArtifactStatus.PartialSuccess
     }
 
     return ArtifactStatus.Skipped

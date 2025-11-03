@@ -102,7 +102,7 @@ class KotlinVersionMismatch(
 )
 
 interface KotlinPluginDiscoveryUpdater {
-    fun discoveredSync(discovery: Discovery, redrawUpdateUpdate: Boolean = true)
+    suspend fun discoveredSync(discovery: Discovery, redrawUpdateUpdate: Boolean = true)
     fun reset()
 
     class Discovery(
@@ -121,7 +121,7 @@ interface KotlinPluginDiscoveryUpdater {
     }
 }
 
-fun KotlinPluginDiscoveryUpdater.discoveredSync(
+suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
     pluginName: String,
     mavenId: String,
     version: String,
@@ -557,14 +557,12 @@ class KotlinPluginsStorage(
                 }
 
             val bundleResult = runCatching {
-                withContext(Dispatchers.IO) {
-                    KotlinPluginsJarLocator.locateArtifacts(
-                        versioned = plugin,
-                        kotlinIdeVersion = kotlinIdeVersion,
-                        dest = destination,
-                        known = known,
-                    )
-                }
+                KotlinPluginsJarLocator.locateArtifacts(
+                    versioned = plugin,
+                    kotlinIdeVersion = kotlinIdeVersion,
+                    dest = destination,
+                    known = known,
+                )
             }
 
             if (bundleResult.isFailure) {
@@ -572,6 +570,7 @@ class KotlinPluginsStorage(
                     pluginName = descriptor.name,
                     status = ArtifactStatus.FailedToLoad("Unexpected error"),
                 )
+                logger.error("Actualize plugins job failed (${plugin.descriptor.name})", bundleResult.exceptionOrNull())
                 failedToLocate = true
                 return@launch
             }
@@ -604,17 +603,19 @@ class KotlinPluginsStorage(
                     if (original != null) {
                         val jarKey = JarId(plugin.descriptor.name, id.id, locatorResult.libVersion)
 
-                        val watchKeyWithChecksum = originalWatchKeys.compute(jarKey) { _, old ->
-                            if (old?.checksum != locatorResult.state.jar.checksum) {
-                                old?.key?.cancel()
+                        val watchKeyWithChecksum = withContext(Dispatchers.IO) {
+                            originalWatchKeys.compute(jarKey) { _, old ->
+                                if (old?.checksum != locatorResult.state.jar.checksum) {
+                                    old?.key?.cancel()
 
-                                original.parent?.registerSafe(
-                                    StandardWatchEventKinds.ENTRY_MODIFY,
-                                    StandardWatchEventKinds.ENTRY_CREATE,
-                                )?.let {
-                                    WatchKeyWithChecksum(it, locatorResult.state.jar.checksum)
-                                }
-                            } else old
+                                    original.parent?.registerSafe(
+                                        StandardWatchEventKinds.ENTRY_MODIFY,
+                                        StandardWatchEventKinds.ENTRY_CREATE,
+                                    )?.let {
+                                        WatchKeyWithChecksum(it, locatorResult.state.jar.checksum)
+                                    }
+                                } else old
+                            }
                         }
 
                         if (watchKeyWithChecksum != null) {
@@ -656,10 +657,12 @@ class KotlinPluginsStorage(
 
             statusPublisher.redraw()
 
-            val watchKey = destination.registerSafe(
-                StandardWatchEventKinds.ENTRY_MODIFY,
-                StandardWatchEventKinds.ENTRY_DELETE,
-            ) ?: return@launch
+            val watchKey = withContext(Dispatchers.IO) {
+                destination.registerSafe(
+                    StandardWatchEventKinds.ENTRY_MODIFY,
+                    StandardWatchEventKinds.ENTRY_DELETE,
+                )
+            } ?: return@launch
 
             pluginWatchKeys[pluginWatchKey] = watchKey
             pluginWatchKeysReverse[watchKey] = pluginWatchKey
@@ -762,10 +765,10 @@ class KotlinPluginsStorage(
         }
 
         val nextJob = scope.launch(
-            context = Dispatchers.IO + CoroutineName(
+            context = CoroutineName(
                 "update-cache-from-disk-${requested.descriptor.name}-${requested.version}"
             ),
-            start = CoroutineStart.LAZY
+            start = CoroutineStart.LAZY,
         ) {
             logger.debug("Updating cache from disk for ${requested.descriptor.name} (${requested.version})")
 
@@ -798,11 +801,13 @@ class KotlinPluginsStorage(
                 return@launch
             }
 
-            val new = pluginWatchKeys.compute(pluginWatchKey) { _, old ->
-                old ?: pluginWatchKey.directoryBlocking(kotlinIdeVersion)?.registerSafe(
-                    StandardWatchEventKinds.ENTRY_MODIFY,
-                    StandardWatchEventKinds.ENTRY_DELETE,
-                )
+            val new = withContext(Dispatchers.IO) {
+                pluginWatchKeys.compute(pluginWatchKey) { _, old ->
+                    old ?: pluginWatchKey.directoryBlocking(kotlinIdeVersion)?.registerSafe(
+                        StandardWatchEventKinds.ENTRY_MODIFY,
+                        StandardWatchEventKinds.ENTRY_DELETE,
+                    )
+                }
             }
 
             if (new != null) {
@@ -835,12 +840,12 @@ class KotlinPluginsStorage(
         }
     }
 
-    private fun findArtifactAndUpdateMap(
+    private suspend fun findArtifactAndUpdateMap(
         pluginMap: ConcurrentHashMap<ResolvedPluginKey, ArtifactState>,
         requested: RequestedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
         pluginWatchKey: VersionedPluginKey,
-    ): StoredJar {
+    ): StoredJar = withContext(Dispatchers.IO) {
         val resolvedPlugin = ResolvedPluginKey(requested.artifact.id, requested.version)
         val state = pluginMap.compute(resolvedPlugin) { _, old ->
             when {
@@ -850,7 +855,7 @@ class KotlinPluginsStorage(
         }
 
         if (state != null) {
-            return StoredJar(
+            return@withContext StoredJar(
                 mavenId = requested.artifact.id,
                 locatedVersion = requested.version,
                 jar = (state as ArtifactState.Cached).jar,
@@ -858,14 +863,14 @@ class KotlinPluginsStorage(
         }
 
         val (foundVersion, foundKotlinVersion, found) = findJarPath(requested, kotlinIdeVersion, pluginWatchKey)
-            ?: return StoredJar(
+            ?: return@withContext StoredJar(
                 mavenId = requested.artifact.id,
                 locatedVersion = requested.version,
                 jar = null,
             )
 
         val checksum = runCatching { md5(found).asChecksum() }.getOrNull()
-            ?: return StoredJar(
+            ?: return@withContext StoredJar(
                 mavenId = requested.artifact.id,
                 locatedVersion = requested.version,
                 jar = null,
@@ -878,7 +883,7 @@ class KotlinPluginsStorage(
 
             logger.debug("Checksums don't match with the original jar for ${requested.artifact.id} (${requested.version})")
 
-            return StoredJar(
+            return@withContext StoredJar(
                 mavenId = requested.artifact.id,
                 locatedVersion = requested.version,
                 jar = null,
@@ -937,7 +942,7 @@ class KotlinPluginsStorage(
             kotlinVersionMismatch = kotlinVersionMismatch,
         )
 
-        return StoredJar(
+        StoredJar(
             mavenId = requested.artifact.id,
             locatedVersion = foundVersion,
             jar = jar,
