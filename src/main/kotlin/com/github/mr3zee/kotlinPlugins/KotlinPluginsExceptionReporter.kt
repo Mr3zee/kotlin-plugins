@@ -84,6 +84,8 @@ class KotlinPluginsExceptionReporterImpl(
 
     private val statusPublisher by lazy { project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC) }
 
+    private val discoveryHandler = DiscoveryHandler()
+
     inner class State(
         private val job: Job,
     ) {
@@ -95,7 +97,7 @@ class KotlinPluginsExceptionReporterImpl(
             }
 
             val connection = project.messageBus.connect()
-            connection.subscribe(KotlinPluginDiscoveryUpdater.TOPIC, DiscoveryHandler())
+            connection.subscribe(KotlinPluginDiscoveryUpdater.TOPIC, discoveryHandler)
             connection
         }
 
@@ -198,18 +200,14 @@ class KotlinPluginsExceptionReporterImpl(
             }
         }
 
+        statusPublisher.redraw()
+
         logger.debug("Finished initial processing of all jars")
     }.let(::State)
 
     private fun processChunk(chunk: List<KotlinPluginDiscoveryUpdater.Discovery>) {
         chunk.forEach { discovery ->
-            val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
-
-            metadata.compute(jarId) { _, old ->
-                computeMetadata(old, discovery)
-            }
-
-            processDiscovery(discovery)
+            discoveryHandler.discoveredSync(discovery, redrawUpdateUpdate = false)
         }
 
         logger.debug("Finished processing chunk of ${chunk.size} jars: ${chunk.map { "${it.pluginName} (${it.mavenId})" }}")
@@ -241,13 +239,17 @@ class KotlinPluginsExceptionReporterImpl(
         }
     }
 
-    private fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
+    private fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
         val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
         stackTraceMap.remove(jarId)
 
         when (val result = KotlinPluginsJarAnalyzer.analyze(discovery.jar)) {
             is KotlinPluginsAnalyzedJar.Success -> {
                 stackTraceMap[jarId] = result.fqNames
+
+                if (redrawUpdateUpdate) {
+                    statusPublisher.redraw()
+                }
             }
 
             is KotlinPluginsAnalyzedJar.Failure -> {
@@ -384,7 +386,7 @@ class KotlinPluginsExceptionReporterImpl(
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
-        override fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery) {
+        override fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
             val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
 
             var new = false
@@ -403,7 +405,7 @@ class KotlinPluginsExceptionReporterImpl(
 
                 refreshNotifications()
 
-                processDiscovery(discovery)
+                processDiscovery(discovery, redrawUpdateUpdate)
             }
         }
 

@@ -102,7 +102,7 @@ class KotlinVersionMismatch(
 )
 
 interface KotlinPluginDiscoveryUpdater {
-    fun discoveredSync(discovery: Discovery)
+    fun discoveredSync(discovery: Discovery, redrawUpdateUpdate: Boolean = true)
     fun reset()
 
     class Discovery(
