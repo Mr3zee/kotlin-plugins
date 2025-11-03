@@ -138,12 +138,11 @@ data class KotlinArtifactsRepository(
     enum class Type { URL, PATH }
 
     override fun toString(): String {
-        val prefix = when (type) {
-            Type.URL -> "Remote"
-            Type.PATH -> "Local"
+        val message = when (type) {
+            Type.URL -> KotlinPluginsBundle.message("repository.string.remote", name, value)
+            Type.PATH -> KotlinPluginsBundle.message("repository.string.local", name, value)
         }
-
-        return "$prefix repository ($name): $value"
+        return message
     }
 }
 

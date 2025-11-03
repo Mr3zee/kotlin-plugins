@@ -17,8 +17,4 @@ object KotlinPluginsBundle {
   @Nls
   fun message(@PropertyKey(resourceBundle = BUNDLE) key: String, vararg params: Any): String =
     INSTANCE.getMessage(key, *params)
-
-  @JvmStatic
-  fun messagePointer(@PropertyKey(resourceBundle = BUNDLE) key: String, vararg params: Any) =
-    INSTANCE.getLazyMessage(key, *params)
 }

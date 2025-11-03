@@ -7,7 +7,6 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.EditorNotificationPanel
 import com.intellij.ui.EditorNotificationProvider
 import com.intellij.ui.EditorNotifications
-import fleet.util.text.pluralizeIf
 import java.util.function.Function
 import javax.swing.JComponent
 
@@ -44,15 +43,13 @@ class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
 
         return Function { editor ->
             val panel = EditorNotificationPanel(editor, EditorNotificationPanel.Status.Error)
-            val pluginWord = "plugin".pluralizeIf(grouped.size > 1)
-            val beWord = if (grouped.size == 1) "is" else "are"
+            val count = grouped.size
             val pluginsText = grouped.keys.joinToString(", ") { "'${it}'" }
 
             panel.text = KotlinPluginsBundle.message(
-                "editor.notification.plugins.throwing",
-                pluginWord,
+                "editor.notification.plugins.throwing.choice",
+                count,
                 pluginsText,
-                beWord,
             )
             panel.icon(KotlinPluginsIcons.Logo)
 

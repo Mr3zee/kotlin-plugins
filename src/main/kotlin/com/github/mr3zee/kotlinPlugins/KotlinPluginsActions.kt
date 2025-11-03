@@ -7,10 +7,13 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.dsl.builder.panel
-import com.intellij.openapi.util.NlsContexts
 import javax.swing.JComponent
 
-open class KotlinPluginsClearCachesAction : AnAction(AllIcons.Actions.ClearCash) {
+open class KotlinPluginsClearCachesAction : AnAction() {
+    init {
+        templatePresentation.icon = AllIcons.Actions.ClearCash
+    }
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val treeState = KotlinPluginsTreeState.getInstance(project)
@@ -27,7 +30,11 @@ open class KotlinPluginsClearCachesAction : AnAction(AllIcons.Actions.ClearCash)
     }
 }
 
-open class KotlinPluginsRefreshAction : AnAction(AllIcons.General.Refresh) {
+open class KotlinPluginsRefreshAction : AnAction() {
+    init {
+        templatePresentation.icon = AllIcons.Actions.Refresh
+    }
+
     override fun getActionUpdateThread(): ActionUpdateThread {
         return ActionUpdateThread.BGT
     }
@@ -37,7 +44,11 @@ open class KotlinPluginsRefreshAction : AnAction(AllIcons.General.Refresh) {
     }
 }
 
-open class KotlinPluginsUpdateAction : AnAction(AllIcons.Vcs.Fetch) {
+open class KotlinPluginsUpdateAction : AnAction() {
+    init {
+        templatePresentation.icon = AllIcons.Vcs.Fetch
+    }
+
     override fun getActionUpdateThread(): ActionUpdateThread {
         return ActionUpdateThread.BGT
     }

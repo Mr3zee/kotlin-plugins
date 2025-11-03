@@ -7,6 +7,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.provider.asNioPathOrNull
 import com.intellij.platform.eel.provider.getEelDescriptor
@@ -47,7 +48,7 @@ sealed interface ArtifactStatus {
     object PartialSuccess : ArtifactStatus
 
     object InProgress : ArtifactStatus
-    class FailedToLoad(val shortMessage: String) : ArtifactStatus
+    class FailedToLoad(@NlsContexts.Label val shortMessage: String) : ArtifactStatus
     object ExceptionInRuntime : ArtifactStatus
 
     object Disabled : ArtifactStatus
@@ -77,8 +78,12 @@ private fun ArtifactState.toStatus(): ArtifactStatus {
     return when (this) {
         is ArtifactState.Cached -> ArtifactStatus.Success(requestedVersion, actualVersion, criteria)
         is ArtifactState.FoundButBundleIsIncomplete -> ArtifactStatus.PartialSuccess
-        is ArtifactState.FailedToFetch -> ArtifactStatus.FailedToLoad("Failed to Fetch")
-        is ArtifactState.NotFound -> ArtifactStatus.FailedToLoad("Not Found")
+        is ArtifactState.FailedToFetch -> ArtifactStatus.FailedToLoad(
+            KotlinPluginsBundle.message("status.failedToFetch")
+        )
+        is ArtifactState.NotFound -> ArtifactStatus.FailedToLoad(
+            KotlinPluginsBundle.message("status.notFound")
+        )
     }
 }
 

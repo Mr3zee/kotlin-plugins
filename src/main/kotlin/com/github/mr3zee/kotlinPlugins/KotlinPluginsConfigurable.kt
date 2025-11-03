@@ -581,6 +581,7 @@ private class RepositoryDialog(
         return form
     }
 
+    @Suppress("DuplicatedCode")
     override fun doValidate(): ValidationInfo? {
         val name = nameField.text.trim()
         if (name.isEmpty()) {
@@ -776,6 +777,7 @@ private class PluginsDialog(
         return form
     }
 
+    @Suppress("DuplicatedCode")
     override fun doValidate(): ValidationInfo? {
         val name = nameField.text.trim()
         if (name.isEmpty()) {

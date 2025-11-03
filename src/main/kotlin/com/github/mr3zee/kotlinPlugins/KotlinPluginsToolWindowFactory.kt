@@ -35,7 +35,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.util.Disposer
-import com.intellij.openapi.util.NlsContext
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
@@ -276,7 +275,7 @@ class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     companion object {
-        const val ID = "Kotlin Plugins Diagnostics"
+        const val ID = "com.github.mr3zee.kotlinPlugins.toolWindow"
         const val PROPORTION_KEY = "KotlinPlugins.Proportion"
     }
 }
@@ -839,7 +838,7 @@ internal class OverviewPanel(
                             val ed = editorField?.editor
                             if (ed != null) {
                                 ApplicationManager.getApplication().invokeLater {
-                                    // Put caret to the beginning and ensure top is visible
+                                    // Put caret to the beginning and ensure the top is visible
                                     ed.caretModel.moveToOffset(0)
                                     ed.scrollingModel.scrollTo(
                                         LogicalPosition(0, 0),
@@ -1040,7 +1039,7 @@ private class NodeData(
     project: Project,
     val parent: NodeData?,
     val key: String,
-    var label: String,
+    @NlsContexts.Label var label: String,
     var status: ArtifactStatus,
     val type: NodeType,
 ) : PresentableNodeDescriptor<NodeData>(project, parent) {
@@ -1158,7 +1157,7 @@ class KotlinPluginsTree(
             project = project,
             parent = null,
             key = "root",
-            label = "Kotlin Plugins",
+            label = "Root",
             status = ArtifactStatus.InProgress,
             type = NodeType.Plugin,
         )
@@ -1559,6 +1558,8 @@ enum class NodeType {
     Plugin, Artifact, Version;
 }
 
+@NlsContexts.Label
+@NlsContexts.Tooltip
 private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type) {
     NodeType.Plugin -> when (status) {
         is ArtifactStatus.Success -> KotlinPluginsBundle.message("tooltip.plugin.success")
@@ -1631,6 +1632,7 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
     return ArtifactStatus.Skipped
 }
 
+@NlsContexts.Label
 private fun KotlinPluginDescriptor.VersionMatching.toUi(): String {
     return when (this) {
         KotlinPluginDescriptor.VersionMatching.EXACT -> KotlinPluginsBundle.message("version.matching.exact")
@@ -1725,6 +1727,7 @@ private val NodeType.displayLowerCaseName
 
 internal val Int.scaled get() = JBUI.scale(this)
 
+@NlsContexts.DetailedDescription
 private fun ExceptionsReport.hint(): String {
     val analysis = when {
         kotlinVersionMismatch != null && isProbablyIncompatible ->
