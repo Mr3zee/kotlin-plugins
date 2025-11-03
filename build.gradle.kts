@@ -118,7 +118,7 @@ intellijPlatform {
     pluginVerification {
         ides {
             select {
-                types = listOf(IntelliJPlatformType.IntellijIdeaCommunity)
+                types = listOf(IntelliJPlatformType.IntellijIdea)
                 channels = listOf(
                     ProductRelease.Channel.RELEASE,
                     ProductRelease.Channel.EAP,
