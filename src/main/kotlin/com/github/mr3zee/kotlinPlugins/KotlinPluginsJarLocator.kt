@@ -226,7 +226,7 @@ internal object KotlinPluginsJarLocator {
                 prefix = "${kotlinIdeVersion}-",
                 filter = matchFilter,
             ) ?: run {
-                LocatorResult.NotFound(
+                val notFoundCommonVersion = LocatorResult.NotFound(
                     state = ArtifactState.NotFound(
                         """
                             |No compiler plugin artifact exists matching the requested version and criteria: 
@@ -241,6 +241,12 @@ internal object KotlinPluginsJarLocator {
 
                     libVersion = versioned.version,
                 )
+
+                versioned.descriptor.ids.forEach {
+                    notFound.compute(it) { _, old ->
+                        old.orEmpty() + notFoundCommonVersion
+                    }
+                }
 
                 return@repositoriesLoop
             }
@@ -362,6 +368,13 @@ internal object KotlinPluginsJarLocator {
                         $formattedNotFoundMessages
                     """.trimMargin(),
                 ),
+                libVersion = notFound.first().libVersion,
+            )
+        }
+
+        if (notFound.isEmpty()) {
+            return LocatorResult.FailedToFetch(
+                state = ArtifactState.FailedToFetch("Unknown error"),
                 libVersion = notFound.first().libVersion,
             )
         }
