@@ -160,9 +160,15 @@ class MyPluginTest : BasePlatformTestCase() {
             type = KotlinArtifactsRepository.Type.URL,
         )
 
+        val central = KotlinArtifactsRepository(
+            name = "Maven Central",
+            value = "https://repo1.maven.org/maven2",
+            type = KotlinArtifactsRepository.Type.URL,
+        )
+
         assertSameElements(
             state.repositories,
-            listOf(repository),
+            listOf(repository, central),
         )
 
         assertSameElements(

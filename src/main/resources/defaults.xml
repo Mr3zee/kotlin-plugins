@@ -2,6 +2,7 @@
 <defaults xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="defaults-schema.xml">
     <repositories>
         <repository id="kxrpc-for-ide" name="kotlinx-rpc for IDE" value="https://maven.pkg.jetbrains.space/public/p/krpc/for-ide" type="URL"/>
+        <repository id="maven-central" name="Maven Central" value="https://repo1.maven.org/maven2" type="URL"/>
     </repositories>
     <plugins>
         <plugin name="kotlinx-rpc" versionMatching="EXACT">
