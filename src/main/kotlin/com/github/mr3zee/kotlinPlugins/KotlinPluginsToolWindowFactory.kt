@@ -99,13 +99,18 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.isDirectory
 
 internal class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
+    override fun init(toolWindow: ToolWindow) {
+        toolWindow.title = KotlinPluginsBundle.message("toolwindow.displayName")
+        toolWindow.stripeTitle = KotlinPluginsBundle.message("toolwindow.displayName")
+        toolWindow.isShowStripeButton = false
+    }
+
     override fun createToolWindowContent(
         project: Project,
         toolWindow: ToolWindow,
     ) {
         toolWindow.title = KotlinPluginsBundle.message("toolwindow.displayName")
         toolWindow.stripeTitle = KotlinPluginsBundle.message("toolwindow.displayName")
-        toolWindow.isShowStripeButton = true
 
         val toolWindowPanel = SimpleToolWindowPanel(false, true)
 
