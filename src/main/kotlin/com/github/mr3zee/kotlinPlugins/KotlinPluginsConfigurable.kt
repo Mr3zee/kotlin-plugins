@@ -15,6 +15,7 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.emptyText
 import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.ui.ContextHelpLabel
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.JBCheckBox
@@ -23,6 +24,7 @@ import com.intellij.ui.components.JBRadioButton
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.actionButton
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.table.JBTable
@@ -33,6 +35,7 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.net.URI
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
@@ -223,7 +226,7 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
                 setSortable(4, false)
             }
 
-            preferredScrollableViewportSize = Dimension(preferredScrollableViewportSize.width, rowHeight * 12)
+            preferredScrollableViewportSize = Dimension(preferredScrollableViewportSize.width, rowHeight * 8)
         }
 
         val repoPanel = ToolbarDecorator.createDecorator(repoTable)
@@ -273,16 +276,27 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
 
                 actionButton(copyKotlinAction)
                     .label(KotlinPluginsBundle.message("settings.kotlin.ide.version", kotlinIdeVersion))
-            }
+            }.rowComment(KotlinPluginsBundle.message("settings.kotlin.ide.version.comment"))
 
             group(KotlinPluginsBundle.message("group.exception.analyzer")) {
                 row {
                     cell(enableAnalyzerCheckBox)
+                        .comment(KotlinPluginsBundle.message("settings.enableAnalyzer.comment"))
+
+                    cell(
+                        ContextHelpLabel.createWithBrowserLink(
+                            null,
+                            KotlinPluginsBundle.message("settings.enableAnalyzer.contextHelp.description"),
+                            KotlinPluginsBundle.message("settings.enableAnalyzer.contextHelp.linkText"),
+                            URI("https://github.com/Mr3zee/kotlin-plugins/blob/main/PLUGIN_AUTHORS.md").toURL(),
+                        )
+                    )
                 }
 
                 indent {
                     row {
                         cell(autoDisablePluginsCheckBox)
+                            .comment(KotlinPluginsBundle.message("settings.autoDisable.comment"))
                     }
                 }
             }
@@ -296,22 +310,41 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
 
         generalContent.add(generalForm, BorderLayout.NORTH)
 
-        val artifactsContent = JPanel(BorderLayout())
         val artifactsForm = FormBuilder.createFormBuilder()
             .addLabeledComponent(
-                /* label = */ JBLabel(KotlinPluginsBundle.message("label.maven.repositories"), AllIcons.Nodes.Folder, SwingConstants.LEADING),
+                /* label = */ JBLabel(
+                    KotlinPluginsBundle.message("label.maven.repositories"),
+                    AllIcons.Nodes.Folder,
+                    SwingConstants.LEADING,
+                ),
                 /* component = */ repoPanel,
                 /* topInset = */ 5,
                 /* labelOnTop = */ true,
             )
             .addLabeledComponent(
-                /* label = */ JBLabel(KotlinPluginsBundle.message("label.kotlin.plugins"), AllIcons.Nodes.Plugin, SwingConstants.LEADING),
+                /* label = */ JBLabel(
+                    KotlinPluginsBundle.message("label.kotlin.plugins"),
+                    AllIcons.Nodes.Plugin,
+                    SwingConstants.LEADING,
+                ),
                 /* component = */ pluginsPanel,
                 /* topInset = */ 5,
                 /* labelOnTop = */ true,
             )
             .panel
-        artifactsContent.add(artifactsForm, BorderLayout.NORTH)
+
+        val artifactsContent = panel {
+            row {
+                comment(KotlinPluginsBundle.message("settings.repositories.comment"))
+            }
+
+            separator()
+
+            row {
+                cell(artifactsForm)
+                    .align(AlignX.FILL)
+            }
+        }
 
         val tabs = JBTabbedPane()
         tabs.addTab(KotlinPluginsBundle.message("tab.general"), generalContent)
@@ -529,8 +562,10 @@ private class RepositoryDialog(
     }
     private val pathLabel = JBLabel(KotlinPluginsBundle.message("label.path"))
 
-    private val urlRadio = JBRadioButton(KotlinPluginsBundle.message("radio.url"), initial?.value?.startsWith("http") ?: true)
-    private val pathRadio = JBRadioButton(KotlinPluginsBundle.message("radio.filePath"), !(initial?.value?.startsWith("http") ?: false))
+    private val urlRadio =
+        JBRadioButton(KotlinPluginsBundle.message("radio.url"), initial?.value?.startsWith("http") ?: true)
+    private val pathRadio =
+        JBRadioButton(KotlinPluginsBundle.message("radio.filePath"), !(initial?.value?.startsWith("http") ?: false))
 
     init {
         title = if (initial == null) {
@@ -727,8 +762,10 @@ private class PluginsDialog(
         }
     }
 
-    private val enabledCheckbox = JBCheckBox(KotlinPluginsBundle.message("checkbox.enablePluginInProject"), enabledInitial)
-    private val ignoreExceptionsCheckbox = JBCheckBox(KotlinPluginsBundle.message("checkbox.ignorePluginExceptions"), initial?.ignoreExceptions ?: false)
+    private val enabledCheckbox =
+        JBCheckBox(KotlinPluginsBundle.message("checkbox.enablePluginInProject"), enabledInitial)
+    private val ignoreExceptionsCheckbox =
+        JBCheckBox(KotlinPluginsBundle.message("checkbox.ignorePluginExceptions"), initial?.ignoreExceptions ?: false)
 
     private val repoCheckboxes: List<JBCheckBox> = availableRepositories.map { repo ->
         JBCheckBox(repo.name, initial?.repositories?.any { it.name == repo.name } == true).apply {
