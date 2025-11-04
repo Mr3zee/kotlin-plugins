@@ -532,7 +532,7 @@ internal class OverviewPanel(
                                 it.maximumSize.width = 600.scaled
                                 it.minimumSize.width = 270.scaled
                                 it.preferredSize.width = 600.scaled
-                                it.preferredSize.height = 270.scaled
+                                it.preferredSize.height = 400.scaled
                             }
                         ) {
                             var area: Cell<JBTextArea>? = null

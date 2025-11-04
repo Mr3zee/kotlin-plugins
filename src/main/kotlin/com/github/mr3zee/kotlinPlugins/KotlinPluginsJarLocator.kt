@@ -98,7 +98,10 @@ internal object KotlinPluginsJarLocator {
         val matchFilter: MatchFilter,
         val dest: Path,
         val kotlinIdeVersion: String,
+        jarClassifier: String,
     ) {
+        val jarClassifier = jarClassifier.takeIf { it.isNotEmpty() }?.let { "-$it" } ?: ""
+
         sealed interface Locator {
             data class ByUrl(
                 val url: String,
@@ -255,46 +258,50 @@ internal object KotlinPluginsJarLocator {
                 val known = knownMap[artifact.id]
                 val locator = locators[artifact] ?: return@artifactsLoop
 
-                val manifest = ArtifactManifest(
-                    artifactId = artifact.artifactId,
-                    locator = locator,
-                    matchFilter = versioned.asMatchFilter(),
-                    dest = dest,
-                    kotlinIdeVersion = kotlinIdeVersion,
-                )
+                for (classifier in setOf("", "for-ide")) {
+                    val manifest = ArtifactManifest(
+                        artifactId = artifact.artifactId,
+                        locator = locator,
+                        matchFilter = versioned.asMatchFilter(),
+                        dest = dest,
+                        kotlinIdeVersion = kotlinIdeVersion,
+                        jarClassifier = classifier,
+                    )
 
-                val locatorResult = locateArtifactByManifest(
-                    logTag = logTag,
-                    manifest = manifest,
-                    libVersion = libVersion,
-                    known = known,
-                )
+                    val locatorResult = locateArtifactByManifest(
+                        logTag = logTag,
+                        manifest = manifest,
+                        libVersion = libVersion,
+                        known = known,
+                    )
 
-                when (locatorResult) {
-                    is LocatorResult.NotFound -> {
-                        notFound.compute(artifact) { _, old ->
-                            old.orEmpty() + LocatorResult.NotFound(
-                                state = locatorResult.state,
-                                libVersion = versioned.version,
-                            )
+                    when (locatorResult) {
+                        is LocatorResult.NotFound -> {
+                            notFound.compute(artifact) { _, old ->
+                                old.orEmpty() + LocatorResult.NotFound(
+                                    state = locatorResult.state,
+                                    libVersion = versioned.version,
+                                )
+                            }
                         }
-                    }
 
-                    is LocatorResult.FailedToFetch -> {
-                        failedToFetch.compute(artifact) { _, old ->
-                            old.orEmpty() + LocatorResult.FailedToFetch(
-                                state = locatorResult.state,
-                                libVersion = versioned.version,
-                            )
+                        is LocatorResult.FailedToFetch -> {
+                            failedToFetch.compute(artifact) { _, old ->
+                                old.orEmpty() + LocatorResult.FailedToFetch(
+                                    state = locatorResult.state,
+                                    libVersion = versioned.version,
+                                )
+                            }
                         }
-                    }
 
-                    is LocatorResult.Cached -> {
-                        cached[artifact] = locatorResult
-                    }
+                        is LocatorResult.Cached -> {
+                            cached[artifact] = locatorResult
+                            return@artifactsLoop // skip other classifiers
+                        }
 
-                    is LocatorResult.FoundButBundleIsIncomplete -> {
-                        // nothing
+                        is LocatorResult.FoundButBundleIsIncomplete -> {
+                            // nothing
+                        }
                     }
                 }
             }
@@ -413,11 +420,12 @@ internal object KotlinPluginsJarLocator {
 
         val filename = "${manifest.artifactId}-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
         val plainFilename = "${manifest.artifactId}-$artifactVersion.jar"
+        val classifiedFilename = "${manifest.artifactId}-$artifactVersion${manifest.jarClassifier}.jar"
 
         val checksumResult = getChecksum(
             logTag = logTag,
             manifest = manifest,
-            artifactName = plainFilename,
+            artifactName = classifiedFilename,
             artifactVersion = artifactVersion,
         )
 
@@ -425,13 +433,13 @@ internal object KotlinPluginsJarLocator {
             is ChecksumResult.Success -> checksumResult.checksum
 
             is ChecksumResult.NotFound -> return LocatorResult.NotFound(
-                state = ArtifactState.NotFound("No checksum file found for $plainFilename in ${manifest.locator}"),
+                state = ArtifactState.NotFound("No checksum file found for $classifiedFilename in ${manifest.locator}"),
                 libVersion = libVersion,
             )
 
             is ChecksumResult.FailedToFetch -> return LocatorResult.FailedToFetch(
                 state = ArtifactState.FailedToFetch(
-                    "Failed to fetch checksum file for $plainFilename from ${manifest.locator}: ${checksumResult.message}"
+                    "Failed to fetch checksum file for $classifiedFilename from ${manifest.locator}: ${checksumResult.message}"
                 ),
                 libVersion = libVersion,
             )
@@ -457,7 +465,7 @@ internal object KotlinPluginsJarLocator {
             manifest = manifest,
             filename = filename,
             logTag = logTag,
-            artifactName = plainFilename,
+            artifactName = classifiedFilename,
             artifactVersion = artifactVersion,
             libVersion = libVersion,
             checksum = checksum,
