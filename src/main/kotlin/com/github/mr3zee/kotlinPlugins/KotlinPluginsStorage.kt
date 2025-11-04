@@ -38,7 +38,7 @@ import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.minutes
 
-sealed interface ArtifactStatus {
+internal sealed interface ArtifactStatus {
     class Success(
         val requestedVersion: String,
         val actualVersion: String,
@@ -55,7 +55,7 @@ sealed interface ArtifactStatus {
     object Skipped : ArtifactStatus
 }
 
-sealed interface ArtifactState {
+internal sealed interface ArtifactState {
     class Cached(
         val jar: Jar,
         val requestedVersion: String,
@@ -87,7 +87,7 @@ private fun ArtifactState.toStatus(): ArtifactStatus {
     }
 }
 
-interface KotlinPluginStatusUpdater {
+internal interface KotlinPluginStatusUpdater {
     fun updatePlugin(pluginName: String, status: ArtifactStatus)
     fun updateArtifact(pluginName: String, mavenId: String, status: ArtifactStatus)
     fun updateVersion(pluginName: String, mavenId: String, version: String, status: ArtifactStatus)
@@ -101,12 +101,12 @@ interface KotlinPluginStatusUpdater {
     }
 }
 
-class KotlinVersionMismatch(
+internal class KotlinVersionMismatch(
     val ideVersion: String,
     val jarVersion: String,
 )
 
-interface KotlinPluginDiscoveryUpdater {
+internal interface KotlinPluginDiscoveryUpdater {
     suspend fun discoveredSync(discovery: Discovery, redrawAfterUpdate: Boolean)
 
     class Discovery(
@@ -125,7 +125,7 @@ interface KotlinPluginDiscoveryUpdater {
     }
 }
 
-suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
+internal suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
     pluginName: String,
     mavenId: String,
     version: String,
@@ -154,7 +154,7 @@ internal data class VersionedPluginKey(
 )
 
 @Service(Service.Level.PROJECT)
-class KotlinPluginsStorage(
+internal class KotlinPluginsStorage(
     private val project: Project,
     parentScope: CoroutineScope,
 ) {

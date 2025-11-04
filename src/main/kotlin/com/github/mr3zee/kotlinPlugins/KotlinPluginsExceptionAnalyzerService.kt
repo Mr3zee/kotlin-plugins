@@ -23,7 +23,7 @@ import java.util.logging.LogRecord
 import kotlin.collections.component1
 import kotlin.collections.component2
 
-class KotlinPluginsExceptionAnalyzerState : BaseState() {
+internal class KotlinPluginsExceptionAnalyzerState : BaseState() {
     var enabled by property(true)
     var autoDisable by property(false)
 }
@@ -33,7 +33,7 @@ class KotlinPluginsExceptionAnalyzerState : BaseState() {
     name = "com.github.mr3zee.kotlinPlugins.KotlinPluginsExceptionAnalyzer",
     storages = [Storage(StoragePathMacros.WORKSPACE_FILE)],
 )
-class KotlinPluginsExceptionAnalyzerService(
+internal class KotlinPluginsExceptionAnalyzerService(
     private val project: Project,
     private val scope: CoroutineScope,
 ) : SimplePersistentStateComponent<KotlinPluginsExceptionAnalyzerState>(KotlinPluginsExceptionAnalyzerState()),

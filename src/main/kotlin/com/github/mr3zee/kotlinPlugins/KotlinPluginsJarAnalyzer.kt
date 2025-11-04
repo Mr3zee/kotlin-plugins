@@ -6,7 +6,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.jar.JarFile
 
-sealed interface KotlinPluginsAnalyzedJar {
+internal sealed interface KotlinPluginsAnalyzedJar {
     data class Success(val fqNames: Set<String>) : KotlinPluginsAnalyzedJar
     data class Failure(val message: String) : KotlinPluginsAnalyzedJar
 }
@@ -18,7 +18,7 @@ sealed interface KotlinPluginsAnalyzedJar {
  * - Excludes synthetic descriptors like `module-info.class` and `package-info.class`.
  * - Duplicates (e.g., from multi-release JARs) are deduplicated.
  */
-object KotlinPluginsJarAnalyzer {
+internal object KotlinPluginsJarAnalyzer {
     suspend fun analyze(jar: Path): KotlinPluginsAnalyzedJar {
         return try {
             doAnalyze(jar)

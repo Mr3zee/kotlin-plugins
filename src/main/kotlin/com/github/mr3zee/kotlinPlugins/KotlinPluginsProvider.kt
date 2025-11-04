@@ -8,7 +8,7 @@ import java.nio.file.Path
 import kotlin.io.path.name
 
 @Suppress("UnstableApiUsage")
-class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
+internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     private val logger by lazy { thisLogger() }
 
     override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {

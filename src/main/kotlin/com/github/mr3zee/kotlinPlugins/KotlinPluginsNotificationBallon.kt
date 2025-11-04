@@ -6,7 +6,7 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.Project
 
-object KotlinPluginsNotificationBallon {
+internal object KotlinPluginsNotificationBallon {
     fun notify(
         project: Project,
         disabledPlugin: String,

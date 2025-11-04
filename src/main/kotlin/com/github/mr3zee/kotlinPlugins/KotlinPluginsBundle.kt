@@ -10,7 +10,7 @@ import org.jetbrains.annotations.PropertyKey
  */
 private const val BUNDLE: String = "messages.KotlinPluginsBundle"
 
-object KotlinPluginsBundle {
+internal object KotlinPluginsBundle {
   private val INSTANCE: DynamicBundle = DynamicBundle(KotlinPluginsBundle.javaClass, BUNDLE)
 
   @JvmStatic

@@ -3,7 +3,7 @@ package com.github.mr3zee.kotlinPlugins
 import com.intellij.openapi.util.JDOMUtil
 import org.jdom.Element
 
-object KotlinPluginsDefaultStateLoader {
+internal object KotlinPluginsDefaultStateLoader {
     fun loadState(): DefaultStateEntry {
         return object : DefaultStateEntry {
             private val loadedXml by lazy {
@@ -136,4 +136,4 @@ object KotlinPluginsDefaultStateLoader {
     }
 }
 
-class KotlinArtifactsRepositoryWithId(val id: String, val repository: KotlinArtifactsRepository)
+internal class KotlinArtifactsRepositoryWithId(val id: String, val repository: KotlinArtifactsRepository)

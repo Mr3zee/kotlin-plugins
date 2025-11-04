@@ -9,7 +9,7 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.dsl.builder.panel
 import javax.swing.JComponent
 
-open class KotlinPluginsClearCachesAction : AnAction() {
+internal open class KotlinPluginsClearCachesAction : AnAction() {
     init {
         templatePresentation.icon = AllIcons.Actions.ClearCash
     }
@@ -30,7 +30,7 @@ open class KotlinPluginsClearCachesAction : AnAction() {
     }
 }
 
-open class KotlinPluginsRefreshAction : AnAction() {
+internal open class KotlinPluginsRefreshAction : AnAction() {
     init {
         templatePresentation.icon = AllIcons.Actions.Refresh
     }
@@ -44,7 +44,7 @@ open class KotlinPluginsRefreshAction : AnAction() {
     }
 }
 
-open class KotlinPluginsUpdateAction : AnAction() {
+internal open class KotlinPluginsUpdateAction : AnAction() {
     init {
         templatePresentation.icon = AllIcons.Vcs.Fetch
     }

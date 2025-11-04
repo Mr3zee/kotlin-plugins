@@ -101,7 +101,7 @@ private class LocalState {
         get() = plugins.associate { it.name to it.enabled }
 }
 
-class KotlinPluginsConfigurable(private val project: Project) : Configurable {
+internal class KotlinPluginsConfigurable(private val project: Project) : Configurable {
     private val local: LocalState = LocalState()
 
     private lateinit var repoTable: JBTable

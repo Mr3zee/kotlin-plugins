@@ -16,13 +16,13 @@ import kotlinx.coroutines.supervisorScope
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
-data class JarId(
+internal data class JarId(
     val pluginName: String,
     val mavenId: String,
     val version: String,
 )
 
-interface KotlinPluginsExceptionReporter {
+internal interface KotlinPluginsExceptionReporter {
     fun start()
 
     fun stop()
@@ -36,7 +36,7 @@ interface KotlinPluginsExceptionReporter {
     fun getExceptionsReport(pluginName: String, mavenId: String, version: String): ExceptionsReport?
 }
 
-class ExceptionsReport(
+internal class ExceptionsReport(
     // The jar is from a local repo
     val isLocal: Boolean,
     // The jar reloaded after to the same one exception occurred
@@ -75,7 +75,7 @@ class ExceptionsReport(
     }
 }
 
-class KotlinPluginsExceptionReporterImpl(
+internal class KotlinPluginsExceptionReporterImpl(
     val project: Project,
     val scope: CoroutineScope,
 ) : KotlinPluginsExceptionReporter, Disposable {

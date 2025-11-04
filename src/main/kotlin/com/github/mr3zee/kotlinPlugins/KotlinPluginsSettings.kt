@@ -20,7 +20,7 @@ import kotlin.collections.distinctBy
     category = SettingsCategory.PLUGINS,
     reloadable = true,
 )
-class KotlinPluginsSettings(
+internal class KotlinPluginsSettings(
     private val project: Project,
 ) : SerializablePersistentStateComponent<KotlinPluginsSettings.StoredState>(
     State(
@@ -130,7 +130,7 @@ class KotlinPluginsSettings(
     )
 }
 
-data class KotlinArtifactsRepository(
+internal data class KotlinArtifactsRepository(
     val name: String,
     val value: String,
     val type: Type,
@@ -147,7 +147,7 @@ data class KotlinArtifactsRepository(
     }
 }
 
-data class KotlinPluginDescriptor(
+internal data class KotlinPluginDescriptor(
     val name: String,
     val ids: List<MavenId>,
     val versionMatching: VersionMatching,
@@ -162,11 +162,11 @@ data class KotlinPluginDescriptor(
     }
 }
 
-fun KotlinPluginDescriptor.hasArtifact(artifact: String): Boolean {
+internal fun KotlinPluginDescriptor.hasArtifact(artifact: String): Boolean {
     return ids.any { it.id == artifact }
 }
 
-data class MavenId(val id: String) {
+internal data class MavenId(val id: String) {
     val groupId: String = id.substringBefore(":")
     val artifactId: String = id.substringAfter(":")
 
@@ -224,7 +224,7 @@ private fun KotlinPluginsSettings.State.asStored(): KotlinPluginsSettings.Stored
     )
 }
 
-fun KotlinPluginsSettings.StoredState.asState(): KotlinPluginsSettings.State {
+internal fun KotlinPluginsSettings.StoredState.asState(): KotlinPluginsSettings.State {
     val mappedRepos = repositories.mapNotNull { (k, v) ->
         val list = v.split(";")
         val value = list.getOrNull(0) ?: return@mapNotNull null
@@ -263,17 +263,17 @@ fun KotlinPluginsSettings.StoredState.asState(): KotlinPluginsSettings.State {
     )
 }
 
-interface DefaultStateEntry {
+internal interface DefaultStateEntry {
     val repositories: List<KotlinArtifactsRepository>
     val plugins: List<KotlinPluginDescriptor>
 }
 
-object DefaultState : DefaultStateEntry by KotlinPluginsDefaultStateLoader.loadState() {
+internal object DefaultState : DefaultStateEntry by KotlinPluginsDefaultStateLoader.loadState() {
     val repositoryMap = repositories.associateBy { it.name }
     val pluginMap = plugins.associateBy { it.name }
 }
 
-open class VersionedKotlinPluginDescriptor(
+internal open class VersionedKotlinPluginDescriptor(
     open val descriptor: KotlinPluginDescriptor,
     open val version: String,
 ) {
@@ -296,7 +296,7 @@ open class VersionedKotlinPluginDescriptor(
     }
 }
 
-class RequestedKotlinPluginDescriptor(
+internal class RequestedKotlinPluginDescriptor(
     descriptor: KotlinPluginDescriptor,
     version: String,
     val artifact: MavenId,

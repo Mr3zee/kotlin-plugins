@@ -34,13 +34,13 @@ import kotlin.io.path.readBytes
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
-class BundleResult(
+internal class BundleResult(
     val locatorResults: Map<MavenId, LocatorResult>,
 ) {
     fun allFound() = locatorResults.all { it.value is LocatorResult.Cached }
 }
 
-sealed interface LocatorResult {
+internal sealed interface LocatorResult {
     val libVersion: String
     val state: ArtifactState
 
@@ -70,7 +70,7 @@ sealed interface LocatorResult {
     ) : LocatorResult
 }
 
-class Jar(
+internal class Jar(
     val path: Path,
     val checksum: String,
     val isLocal: Boolean,
@@ -972,12 +972,12 @@ internal fun ByteArray.asChecksum(): String = String.format("%032x", BigInteger(
 
 private const val DOWNLOADING_EXTENSION = "downloading"
 
-data class MatchFilter(
+internal data class MatchFilter(
     val version: String,
     val matching: KotlinPluginDescriptor.VersionMatching,
 )
 
-fun VersionedKotlinPluginDescriptor.asMatchFilter(): MatchFilter {
+internal fun VersionedKotlinPluginDescriptor.asMatchFilter(): MatchFilter {
     return MatchFilter(version, descriptor.versionMatching)
 }
 

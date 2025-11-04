@@ -98,7 +98,7 @@ import javax.swing.tree.TreeSelectionModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.isDirectory
 
-class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
+internal class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(
         project: Project,
         toolWindow: ToolWindow,
@@ -1096,7 +1096,7 @@ private class NodeData(
     }
 }
 
-class KotlinPluginsTreeState : BaseState() {
+internal class KotlinPluginsTreeState : BaseState() {
     var showSucceeded: Boolean by property(true)
     var showSkipped: Boolean by property(true)
 
@@ -1141,11 +1141,11 @@ class KotlinPluginsTreeState : BaseState() {
     name = "com.github.mr3zee.kotlinPlugins.KotlinPluginTreeState",
     storages = [Storage(WORKSPACE_FILE)],
 )
-class KotlinPluginTreeStateService(
+internal class KotlinPluginTreeStateService(
     val treeScope: CoroutineScope,
 ) : SimplePersistentStateComponent<KotlinPluginsTreeState>(KotlinPluginsTreeState())
 
-class KotlinPluginsTree(
+internal class KotlinPluginsTree(
     private val project: Project,
     val state: KotlinPluginsTreeState,
     val settings: KotlinPluginsSettings,
@@ -1554,7 +1554,7 @@ private fun statusToIcon(status: ArtifactStatus) = when (status) {
     ArtifactStatus.Skipped -> AllIcons.RunConfigurations.TestIgnored
 }
 
-enum class NodeType {
+internal enum class NodeType {
     Plugin, Artifact, Version;
 }
 

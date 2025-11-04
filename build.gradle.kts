@@ -21,6 +21,8 @@ version = providers.gradleProperty("pluginVersion").get()
 // Set the JVM language level used to build the project.
 kotlin {
     jvmToolchain(21)
+
+    explicitApi()
 }
 
 // Configure project's dependencies

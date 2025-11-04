@@ -10,7 +10,7 @@ import com.intellij.ui.EditorNotifications
 import java.util.function.Function
 import javax.swing.JComponent
 
-class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
+internal class KotlinPluginsEditorNotificationProvider : EditorNotificationProvider {
     override fun isDumbAware(): Boolean = true
 
     override fun collectNotificationData(

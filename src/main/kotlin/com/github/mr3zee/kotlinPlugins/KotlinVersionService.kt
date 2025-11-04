@@ -4,7 +4,7 @@ import com.intellij.openapi.components.Service
 import org.jetbrains.kotlin.idea.fir.extensions.KotlinK2BundledCompilerPlugins
 
 @Service
-class KotlinVersionService {
+public class KotlinVersionService {
     private val version by lazy {
         KotlinK2BundledCompilerPlugins::class.java.classLoader
             .getResourceAsStream("META-INF/compiler.version")?.use { stream ->
@@ -12,7 +12,7 @@ class KotlinVersionService {
             }?.trim() ?: error("Kotlin version file not found")
     }
 
-    fun getKotlinIdePluginVersion(): String {
+    public fun getKotlinIdePluginVersion(): String {
         return version
     }
 }

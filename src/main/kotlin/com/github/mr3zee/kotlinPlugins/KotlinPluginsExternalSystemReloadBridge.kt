@@ -29,7 +29,7 @@ import kotlin.time.Duration.Companion.milliseconds
  * deferring execution until indices are ready (Smart mode).
  */
 @Service(Service.Level.PROJECT)
-class KotlinPluginsExternalSystemReloadBridgeService(
+internal class KotlinPluginsExternalSystemReloadBridgeService(
     private val project: Project,
     parentScope: CoroutineScope,
 ) : Disposable {
@@ -83,7 +83,7 @@ class KotlinPluginsExternalSystemReloadBridgeService(
     }
 }
 
-class ExternalSystemReloadBridgeActivity : ProjectActivity {
+internal class ExternalSystemReloadBridgeActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         // Instantiate the service to set up listeners
         project.service<KotlinPluginsExternalSystemReloadBridgeService>()
