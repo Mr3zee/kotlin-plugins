@@ -1,8 +1,43 @@
 # Advanced Usage Guide: Kotlin External FIR Support (KEFS)
 
+This is KEFS in action:
+
+![kefs-in-action.png](.github/pics/kefs-in-action.png)
+
+This diagnostic is provided by an external compiler plugin. 
+It works stably in IDE thanks to KEFS.
+
 This guide provides a deep dive into all the user-facing settings, diagnostics, and workflows for the KEFS plugin.
 
 > Some UI pictures may be outdated in details, core functionality remains.
+
+## 0. Problem statement
+
+Kotlin compiler API is not stable and can change at any time.
+This means that compiler plugins that rely on the compiler API may break in between releases.
+It is relatively easy to address this problem for project builds 
+by publishing a new version of the plugin for each stable release of the Kotlin compiler.
+
+It is far more complicated when it comes to running the plugin in the IDE.
+
+IDE **does not** run non-bundled plugins by default.
+It is because the IDE has its own Kotlin compiler that runs inside it 
+and provides highlighting information, diagnostics, generated code rendering, etc.
+
+This compiler version is different from the one in a user's project.
+This means that the IDE's compiler may not be compatible with the plugin's API with the high probability.
+
+Incompatibility can lead to crashes, incorrect behavior, or unexpected results in the IDE.
+
+## 0.1. Solution: KEFS
+
+KEFS is a plugin that knows how to tell Kotlin in the IDE 
+that it should use a different version of a compiler plugin from the user project.
+
+It can cache, store, analyse, and manage all plugin jars.
+It can also monitor the IDE for any exceptions thrown by the plugin.
+
+> All of this, provided that there is a compatible version of the plugin (see [Developer guide](PLUGIN_AUTHORS.md))
 
 ## 1. Configuring Plugins (Settings)
 
@@ -87,7 +122,7 @@ Editing the default plugin:
 
 #### Storing Settings
 
-When done and saved the settings, `.idea/kotlinPlugins.xml` will be created in your project. 
+When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project. 
 Add it to your VCS so that other developers can use the same workflow.
 
 #### Version Patters
@@ -212,7 +247,7 @@ you can create a "hot-reload" workflow.
     * Go to your **Kotlin Plugins** settings and add a new plugin bundle.
     * Ensure your plugin bundle is configured with the correct coordinates and that it is linked to the new local
       repository you just added.
-    * When done and saved the settings, `.idea/kotlinPlugins.xml` will be created in your project. 
+    * When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project. 
       Add it to your VCS so that other developers can use the same workflow.
 3. **Run your build:** Publish your plugin to the local repo.
 4. **Work in the IDE:** KEFS will find, load, and cache your local plugin 

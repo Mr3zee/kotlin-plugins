@@ -34,7 +34,7 @@
   local repositories, KEFS uses symlinks to watch the original file, enabling automatic hot-reloading of a plugin in the
   IDE when it's re-published locally.
 * **Project-Level Configuration:** All plugin and repository settings are now stored in the project's
-  `.idea/kotlinPlugins.xml` file.
+  `.idea/kotlin-plugins.xml` file.
 * **User Actions:** Added three new actions available from the "Find Action" (Ctrl/Cmd+Shift+A)
   menu:
     * `Kotlin FIR External Support: Update Plugins`

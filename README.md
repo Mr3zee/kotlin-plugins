@@ -17,9 +17,9 @@ Run Kotlin compiler plugins in the IDE.
 
 ## Guides
 
-Check out our advanced usage guide: [GUIDE.md](GUIDE.md)
+Check out our advanced usage guide: [GUIDE.md](https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md)
 
-If you are a compiler plugin developer, check out our [plugin development guide](PLUGIN_AUTHORS.md).
+If you are a compiler plugin developer, check out our [plugin development guide](https://github.com/Mr3zee/kotlin-plugins/blob/main/PLUGIN_AUTHORS.md).
 
 ## Use Any Kotlin Compiler Plugin Inside IDE
 
@@ -38,8 +38,9 @@ highlighting, and code analysis.
    immediately.
 
 This solves the core instability problem and allows you to benefit from your compiler
-plugins' IDE-specific features, like custom diagnostics, all within the editor
-and **No Additional Configuration Required!**.
+plugins' IDE-specific features, like custom diagnostics, all within the editor.
+
+**No Additional Configuration Required!**.
 
 ## Core Features
 
