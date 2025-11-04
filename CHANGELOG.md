@@ -6,12 +6,12 @@
 
 ### Added
 
-#### 🚀 Core Plugin Resolution
+#### Core Plugin Resolution
 
 * **Plugin Replacement Engine:** Added the core mechanism to intercept Kotlin compiler plugin requests within the
-  IDE. This allows KEFS to replace a project's plugin version (e.g., built for Kotlin `2.2.20`) with a
+  IDE. This allows KEFS to replace a project's plugin version (e.g. built for Kotlin `2.2.20`) with a
   version compatible with the IDE's internal compiler (e.g., `2.2.0-ij251-78`).
-* **Plugin Bundles:** Added support for "bundles," which group multiple artifacts (e.g., `cli`, `k2`,
+* **Plugin Bundles:** Added support for "bundles", which group multiple artifacts (e.g., `cli`, `k2`,
   `backend`, `common`) to be treated as a single compiler plugin.
 * **Version Resolution Strategies:** Implemented three strategies for finding compatible plugin
   versions:
@@ -29,7 +29,7 @@
 * **Periodic Updates:** Implemented a background "Actualization" job that runs every 2 minutes to check for
   new versions of plugins.
 * **Checksum Verification:** KEFS now calculates and compares MD5 checksums to avoid re-downloading jars
-  that are already present and up-to-date.
+  that are already present and are up to date.
 * **File Watching & Hot-Reload:** Added file watchers for all cached jars. For
   local repositories, KEFS uses symlinks to watch the original file, enabling automatic hot-reloading of a plugin in the
   IDE when it's re-published locally.
@@ -43,11 +43,11 @@
 * **Project Sync Hook:** KEFS now hooks into project reloads (like a Gradle sync) to clear its state and
   adapt to configuration changes.
 
-#### 🛡️ Exception Analysis & IDE Stability
+#### Exception Analysis & IDE Stability
 
 * **Runtime Exception Tracking:** Added a new feature to analyze all exceptions reported to the IDE's root
   logger.
-* **Fault Pinpointing:** KEFS analyzes the class FQ names of all loaded plugin jars. 
+* **Fault Detection:** KEFS analyzes the class FQ names of all loaded plugin jars. 
   If an exception's stack trace matches a class from a known plugin, KEFS identifies that plugin as the source of the
   failure.
 * **Editor Banner Notification:** When a plugin throws an exception, a banner now appears at the top of the
@@ -60,7 +60,7 @@
 * **Global Toggle:** Exception Analysis can be enabled or disabled in the workspace
   settings.
 
-#### 🖥️ UI & Diagnostics
+#### UI & Diagnostics
 
 * **"Kotlin Plugins Diagnostics" Tool Window:** Added a new tool window to provide a complete real-time
   overview of all configured compiler plugins and their artifacts.
@@ -73,7 +73,7 @@
     * **Exception in runtime:** Shows a detailed report for any plugin that failed during
       execution.
     * **Skipped:** The plugin has not been requested by the project yet.
-    * **Disabled:** The plugin was disabled by the user.
+    * **Disabled:** The user disabled the plugin.
 * **Exception & Jar Inspection:** The diagnostics panel can display the full list of analyzed classes in a
   jar.
 * **Settings Page:** Added a new settings page under `Tools > Kotlin Plugins`.
