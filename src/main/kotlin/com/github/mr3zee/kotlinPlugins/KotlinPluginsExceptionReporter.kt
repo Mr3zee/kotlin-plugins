@@ -243,6 +243,11 @@ internal class KotlinPluginsExceptionReporterImpl(
         val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
         stackTraceMap.remove(jarId)
 
+        val plugin = project.service<KotlinPluginsSettings>().pluginByName(discovery.pluginName) ?: return
+        if (plugin.ignoreExceptions) {
+            return
+        }
+
         when (val result = KotlinPluginsJarAnalyzer.analyze(discovery.jar)) {
             is KotlinPluginsAnalyzedJar.Success -> {
                 stackTraceMap[jarId] = result.fqNames
@@ -294,6 +299,10 @@ internal class KotlinPluginsExceptionReporterImpl(
     ) {
         val plugin = settings.pluginByName(pluginName) ?: return
 
+        if (plugin.ignoreExceptions) {
+            return
+        }
+
         val newExceptions = mutableSetOf<JarId>()
 
         val exceptionId = buildString {
@@ -333,10 +342,6 @@ internal class KotlinPluginsExceptionReporterImpl(
 
         newExceptions.forEach { id ->
             statusPublisher.updateVersion(id.pluginName, id.mavenId, id.version, ArtifactStatus.ExceptionInRuntime)
-        }
-
-        if (plugin.ignoreExceptions) {
-            return
         }
 
         if (autoDisable) {
