@@ -83,9 +83,15 @@ class MyPluginTest : BasePlatformTestCase() {
     }
 
     fun testManifestDownload() = runBlocking {
+        val repo = KotlinArtifactsRepository(
+            name = "kotlinx-rpc for IDE",
+            value = "https://maven.pkg.jetbrains.space/public/p/krpc/for-ide",
+            type = KotlinArtifactsRepository.Type.URL,
+        )
         val manifestResult = KotlinPluginsJarLocator.locateManifestAndGetVersionsFromRemoteRepository(
             KotlinPluginsJarLocator.ArtifactManifest.Locator.ByUrl(
-                "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin"
+                repo,
+                "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin",
             ),
         )
 
@@ -146,7 +152,9 @@ class MyPluginTest : BasePlatformTestCase() {
             known = emptyMap(),
         )
 
-        val jarFile = tempFile.toFile().listFiles()?.firstOrNull()
+        val jarFile = tempFile.toFile().listFiles()?.firstOrNull {
+            it.name.endsWith(".jar")
+        }
         assertNotNull(jarFile)
         assertTrue(jarFile!!.exists())
         assertEquals(jarFile.toPath(), (result.locatorResults.values.single() as LocatorResult.Cached).jar.path)
