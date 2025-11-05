@@ -1,7 +1,8 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
+import kotlinx.coroutines.Dispatchers
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
@@ -426,7 +427,8 @@ internal class KotlinPluginsExceptionReporterImpl(
     }
 
     private fun refreshNotifications() {
-        ApplicationManager.getApplication().invokeLater {
+        // Ensure notifications refresh happens on EDT using the service coroutine scope
+        scope.launch(Dispatchers.EDT) {
             EditorNotifications.getInstance(project).updateAllNotifications()
         }
     }

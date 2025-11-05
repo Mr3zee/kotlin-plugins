@@ -28,6 +28,10 @@ internal open class KotlinPluginsClearCachesAction : AnAction() {
             e.project?.service<KotlinPluginsStorage>()?.clearCaches()
         }
     }
+
+    override fun getActionUpdateThread(): ActionUpdateThread {
+        return ActionUpdateThread.EDT
+    }
 }
 
 internal open class KotlinPluginsRefreshAction : AnAction() {

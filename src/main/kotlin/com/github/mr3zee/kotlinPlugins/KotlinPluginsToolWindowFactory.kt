@@ -12,7 +12,6 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.ToggleAction
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
@@ -21,7 +20,6 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.ScrollType
@@ -29,7 +27,6 @@ import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.TextAttributes
-import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
@@ -66,7 +63,6 @@ import com.intellij.util.ui.tree.TreeUtil
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import java.awt.BorderLayout
@@ -95,7 +91,6 @@ import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreeNode
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
-import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.isDirectory
 
 internal class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
@@ -344,7 +339,9 @@ internal class OverviewPanel(
                     exceptionsRepaint()
                 } else {
                     this.exceptionsRepaint = null
-                    ApplicationManager.getApplication().invokeLater { render() }
+                    // Schedule UI update on EDT via project-bound coroutine scope
+                    project.service<KotlinPluginTreeStateService>().treeScope
+                        .launch(Dispatchers.EDT) { render() }
                 }
             }
         }
@@ -493,19 +490,21 @@ internal class OverviewPanel(
                                     }
 
                                     loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
-                                        ApplicationManager.getApplication().invokeLater {
-                                            if (names.isEmpty()) {
-                                                placeholder?.text = KotlinPluginsBundle.message("analyzed.classes.none")
-                                                list?.isVisible = false
-                                            } else {
-                                                placeholder?.isVisible = false
-                                                model.clear()
-                                                names.sorted().forEach { model.addElement(it) }
-                                                list?.isVisible = true
+                                        // Update UI on EDT using the tool window coroutine scope
+                                        project.service<KotlinPluginTreeStateService>().treeScope
+                                            .launch(Dispatchers.EDT) {
+                                                if (names.isEmpty()) {
+                                                    placeholder?.text = KotlinPluginsBundle.message("analyzed.classes.none")
+                                                    list?.isVisible = false
+                                                } else {
+                                                    placeholder?.isVisible = false
+                                                    model.clear()
+                                                    names.sorted().forEach { model.addElement(it) }
+                                                    list?.isVisible = true
+                                                }
+                                                overviewPanelComponent.revalidate()
+                                                overviewPanelComponent.repaint()
                                             }
-                                            overviewPanelComponent.revalidate()
-                                            overviewPanelComponent.repaint()
-                                        }
                                     }
                                 }
                             }
@@ -777,9 +776,11 @@ internal class OverviewPanel(
                 row {
                     cell(ActionLink(KotlinPluginsBundle.message("link.disableThisPlugin")) {
                         project.service<KotlinPluginsNotifications>().deactivate(plugin)
-                        ApplicationManager.getApplication().invokeLater {
-                            EditorNotifications.getInstance(project).updateAllNotifications()
-                        }
+                        // Refresh editor notifications on EDT via project-bound scope
+                        project.service<KotlinPluginTreeStateService>().treeScope
+                            .launch(Dispatchers.EDT) {
+                                EditorNotifications.getInstance(project).updateAllNotifications()
+                            }
 
                         project.service<KotlinPluginsSettings>()
                             .disablePlugin(plugin)
@@ -787,9 +788,11 @@ internal class OverviewPanel(
 
                     cell(ActionLink(KotlinPluginsBundle.message("editor.notification.autoDisable")) {
                         project.service<KotlinPluginsNotifications>().deactivate(plugin)
-                        ApplicationManager.getApplication().invokeLater {
-                            EditorNotifications.getInstance(project).updateAllNotifications()
-                        }
+                        // Refresh editor notifications on EDT via project-bound scope
+                        project.service<KotlinPluginTreeStateService>().treeScope
+                            .launch(Dispatchers.EDT) {
+                                EditorNotifications.getInstance(project).updateAllNotifications()
+                            }
 
                         project.service<KotlinPluginsExceptionAnalyzerService>()
                             .updateState(enabled = true, autoDisable = true)
@@ -842,16 +845,18 @@ internal class OverviewPanel(
                         if (expanded) {
                             val ed = editorField?.editor
                             if (ed != null) {
-                                ApplicationManager.getApplication().invokeLater {
-                                    // Put caret to the beginning and ensure the top is visible
-                                    ed.caretModel.moveToOffset(0)
-                                    ed.scrollingModel.scrollTo(
-                                        LogicalPosition(0, 0),
-                                        ScrollType.MAKE_VISIBLE
-                                    )
-                                    // And/or force vertical position to 0 for good measure
-                                    ed.scrollingModel.scrollVertically(0)
-                                }
+                                // Ensure caret/scroll adjustments run on EDT
+                                project.service<KotlinPluginTreeStateService>().treeScope
+                                    .launch(Dispatchers.EDT) {
+                                        // Put caret to the beginning and ensure the top is visible
+                                        ed.caretModel.moveToOffset(0)
+                                        ed.scrollingModel.scrollTo(
+                                            LogicalPosition(0, 0),
+                                            ScrollType.MAKE_VISIBLE
+                                        )
+                                        // And/or force vertical position to 0 for good measure
+                                        ed.scrollingModel.scrollVertically(0)
+                                    }
                             }
                         }
                     }
@@ -879,11 +884,12 @@ internal class OverviewPanel(
             row { cell(exceptionsPanel) }
 
             loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
-                ApplicationManager.getApplication().invokeLater {
-                    exceptionPanes.forEach { (pane, throwable) ->
-                        updateExceptionEditor(pane, throwable, names)
+                project.service<KotlinPluginTreeStateService>().treeScope
+                    .launch(Dispatchers.EDT) {
+                        exceptionPanes.forEach { (pane, throwable) ->
+                            updateExceptionEditor(pane, throwable, names)
+                        }
                     }
-                }
             }
 
             separator()
@@ -912,6 +918,7 @@ internal class OverviewPanel(
         }
     }
 
+    @Suppress("JComponentDataProvider")
     private class ExceptionEditorTextField(
         text: String,
         project: Project,
@@ -1115,17 +1122,24 @@ internal class KotlinPluginsTreeState : BaseState() {
             project.service<KotlinPluginTreeStateService>().state
     }
 
-    fun select(pluginName: String? = null, mavenId: String? = null, version: String? = null) {
-        try {
-            if (pluginName == null) {
-                selectedNodeKey = null
-                return
-            }
+    fun select(
+        project: Project,
+        pluginName: String? = null,
+        mavenId: String? = null,
+        version: String? = null,
+    ) {
+        project.service<KotlinPluginTreeStateService>().treeScope.launch(Dispatchers.EDT) {
+            try {
+                if (pluginName == null) {
+                    selectedNodeKey = null
+                    return@launch
+                }
 
-            val key = nodeKey(pluginName, mavenId, version)
-            selectedNodeKey = key
-        } finally {
-            actions.forEach { it() }
+                val key = nodeKey(pluginName, mavenId, version)
+                selectedNodeKey = key
+            } finally {
+                actions.forEach { it() }
+            }
         }
     }
 
@@ -1188,7 +1202,6 @@ internal class KotlinPluginsTree(
         connection.dispose()
         nodesByKey.clear()
         model.setRoot(null)
-        updaterJob?.cancel()
         updaters.close()
         updaters.cancel()
     }
@@ -1205,8 +1218,6 @@ internal class KotlinPluginsTree(
         TreeUIHelper.getInstance().installTreeSpeedSearch(this)
 
         putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
-
-        startUpdatingUi()
 
         updater.reset()
 
@@ -1403,28 +1414,9 @@ internal class KotlinPluginsTree(
     }
 
     private fun updateUi(body: () -> Unit) {
-        updaters.trySend(body)
-    }
-
-    private var updaterJob: Job? = null
-    private val logger = thisLogger()
-
-    private fun startUpdatingUi() {
-        updaterJob = project.service<KotlinPluginTreeStateService>().treeScope
-            .launch(Dispatchers.EDT + CoroutineName("KotlinPluginsTreeUpdater")) {
-                while (true) {
-                    val updater = updaters.receiveCatching().getOrNull() ?: break
-
-                    try {
-                        updater.invoke()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: ProcessCanceledException) {
-                        throw e
-                    } catch (e: Throwable) {
-                        logger.error("Error while updating Tree UI", e)
-                    }
-                }
+        project.service<KotlinPluginTreeStateService>().treeScope
+            .launch(Dispatchers.EDT) {
+                body()
             }
     }
 

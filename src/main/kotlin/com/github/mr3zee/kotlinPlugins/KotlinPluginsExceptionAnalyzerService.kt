@@ -1,6 +1,7 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.SimplePersistentStateComponent
@@ -13,6 +14,7 @@ import com.intellij.openapi.project.Project
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.job
@@ -135,11 +137,11 @@ internal class KotlinPluginsExceptionAnalyzerService(
         startHandler()
     }
 
-    fun updateState(enabled: Boolean, autoDisable: Boolean) {
+    fun updateState(enabled: Boolean, autoDisable: Boolean) = scope.launch(Dispatchers.EDT) {
         state.autoDisable = autoDisable
 
         if (state.enabled == enabled) {
-            return
+            return@launch
         }
 
         state.enabled = enabled
