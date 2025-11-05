@@ -10,6 +10,7 @@ import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.emptyText
@@ -25,6 +26,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.Row
 import com.intellij.ui.dsl.builder.actionButton
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.table.JBTable
@@ -36,7 +38,6 @@ import java.awt.Dimension
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.net.URI
-import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
 import javax.swing.DefaultComboBoxModel
@@ -312,7 +313,8 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
 
         val artifactsForm = FormBuilder.createFormBuilder()
             .addLabeledComponent(
-                /* label = */ JBLabel(
+                /* label = */
+                JBLabel(
                     KotlinPluginsBundle.message("label.maven.repositories"),
                     AllIcons.Nodes.Folder,
                     SwingConstants.LEADING,
@@ -322,7 +324,8 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
                 /* labelOnTop = */ true,
             )
             .addLabeledComponent(
-                /* label = */ JBLabel(
+                /* label = */
+                JBLabel(
                     KotlinPluginsBundle.message("label.kotlin.plugins"),
                     AllIcons.Nodes.Plugin,
                     SwingConstants.LEADING,
@@ -509,63 +512,18 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
 private class RepositoryDialog(
     private val currentNames: List<String> = emptyList(),
     private val initial: KotlinArtifactsRepository?,
-    project: Project,
+    private val project: Project,
 ) : DialogWrapper(true) {
     private val isDefault = initial?.name in DefaultState.repositoryMap
 
-    private val warningLabel = JBLabel(
-        KotlinPluginsBundle.message("repository.default.cannot.edit"),
-        AllIcons.General.Warning,
-        SwingConstants.LEADING,
-    ).apply {
-        foreground = JBUI.CurrentTheme.Label.warningForeground()
-        isVisible = isDefault
-        horizontalAlignment = SwingConstants.CENTER
-    }
-
-    private val nameField = JBTextField(initial?.name.orEmpty()).apply {
-        emptyText.text = KotlinPluginsBundle.message("emptyText.uniqueName")
-
-        minimumSize = Dimension(300.scaled, minimumSize.height)
-        toolTipText = if (isDefault) {
-            KotlinPluginsBundle.message("tooltip.defaultRepoNameNotEditable")
-        } else {
-            KotlinPluginsBundle.message("tooltip.nameMustBeUnique")
-        }
-    }
-
-    private val urlField = JBTextField().apply {
-        emptyText.text = KotlinPluginsBundle.message("repository.url.emptyText")
-
-        text = if (initial?.value?.startsWith("http") == true) initial.value else ""
-        minimumSize = Dimension(600.scaled, minimumSize.height)
-
-        if (isDefault) {
-            toolTipText = KotlinPluginsBundle.message("tooltip.defaultRepoUrlNotEditable")
-        }
-    }
-
-    private val urlLabel = JBLabel(KotlinPluginsBundle.message("label.url"))
-
-    private val pathField = TextFieldWithBrowseButton().apply {
-        emptyText.text = KotlinPluginsBundle.message("repository.path.emptyText")
-
-        text = if (initial != null && !initial.value.startsWith("http")) initial.value else ""
-        val descriptor = FileChooserDescriptorFactory
-            .createSingleFolderDescriptor()
-
-        addBrowseFolderListener(com.intellij.openapi.ui.TextBrowseFolderListener(descriptor, project))
-
-        if (isDefault) {
-            toolTipText = KotlinPluginsBundle.message("tooltip.defaultRepoPathNotEditable")
-        }
-    }
-    private val pathLabel = JBLabel(KotlinPluginsBundle.message("label.path"))
-
-    private val urlRadio =
-        JBRadioButton(KotlinPluginsBundle.message("radio.url"), initial?.value?.startsWith("http") ?: true)
-    private val pathRadio =
-        JBRadioButton(KotlinPluginsBundle.message("radio.filePath"), !(initial?.value?.startsWith("http") ?: false))
+    // UI components built via Kotlin UI DSL only
+    private lateinit var nameField: JBTextField
+    private lateinit var urlField: JBTextField
+    private lateinit var pathField: TextFieldWithBrowseButton
+    private lateinit var urlRadio: JBRadioButton
+    private lateinit var pathRadio: JBRadioButton
+    private lateinit var urlRow: Row
+    private lateinit var pathRow: Row
 
     init {
         title = if (initial == null) {
@@ -573,48 +531,138 @@ private class RepositoryDialog(
         } else {
             KotlinPluginsBundle.message("dialog.repository.title.edit")
         }
-        nameField.isEditable = !isDefault
-        urlField.isEditable = !isDefault
-        pathField.isEditable = !isDefault
 
         init()
-
-        val group = ButtonGroup()
-        group.add(urlRadio)
-        group.add(pathRadio)
-        toggleFields()
-
-        urlRadio.addActionListener { toggleFields() }
-        pathRadio.addActionListener { toggleFields() }
-    }
-
-    private fun toggleFields() {
-        urlField.isVisible = urlRadio.isSelected
-        urlLabel.isVisible = urlRadio.isSelected
-        pathField.isVisible = pathRadio.isSelected
-        pathLabel.isVisible = pathRadio.isSelected
     }
 
     override fun createCenterPanel(): JComponent {
-        val form = FormBuilder.createFormBuilder()
-            .addComponent(warningLabel)
-            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.name")), nameField)
-            .apply {
-                if (!isDefault) {
-                    addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.kind")), JPanel().apply {
-                        layout = BoxLayout(this, BoxLayout.X_AXIS)
-                        add(urlRadio)
-                        add(Box.createHorizontalStrut(8))
-                        add(pathRadio)
-                    })
-                }
+        val panel = panel {
+            // Warning label for default repositories
+            row {
+                label(KotlinPluginsBundle.message("repository.default.cannot.edit")).applyToComponent {
+                    icon = AllIcons.General.Warning
+                    foreground = JBUI.CurrentTheme.Label.warningForeground()
+                }.align(AlignX.CENTER)
+            }.visible(isDefault)
+
+            // Name
+            row(KotlinPluginsBundle.message("label.name")) {
+                nameField = textField()
+                    .applyToComponent {
+                        text = initial?.name.orEmpty()
+                        emptyText.text = KotlinPluginsBundle.message("emptyText.uniqueName")
+                        minimumSize = Dimension(300.scaled, minimumSize.height)
+                        toolTipText = if (isDefault) {
+                            KotlinPluginsBundle.message("tooltip.defaultRepoNameNotEditable")
+                        } else {
+                            KotlinPluginsBundle.message("tooltip.nameMustBeUnique")
+                        }
+                        isEditable = !isDefault
+                    }
+                    .component
             }
-            .addLabeledComponent(urlLabel, urlField)
-            .addLabeledComponent(pathLabel, pathField)
-            .panel
-        form.preferredSize = Dimension(650.scaled, 0.scaled)
-        return form
+
+            // Kind (URL vs PATH) radios
+            if (!isDefault) {
+                buttonsGroup {
+                    row(KotlinPluginsBundle.message("label.kind")) {
+                        val initialIsUrl = initial?.value?.startsWith("http") ?: true
+                        urlRadio = radioButton(KotlinPluginsBundle.message("radio.url"))
+                            .applyToComponent {
+                                isSelected = initialIsUrl
+                            }
+                            .component
+                        pathRadio = radioButton(KotlinPluginsBundle.message("radio.filePath"))
+                            .applyToComponent {
+                                isSelected = !initialIsUrl
+                            }
+                            .component
+                    }
+                }
+
+                // URL field
+                urlRow = row(KotlinPluginsBundle.message("label.url")) {
+                    urlField = textField()
+                        .applyToComponent {
+                            emptyText.text = KotlinPluginsBundle.message("repository.url.emptyText")
+                            text = if (initial?.value?.startsWith("http") == true) initial.value else ""
+
+                            isEditable = true
+                        }
+                        .align(AlignX.FILL)
+                        .comment(KotlinPluginsBundle.message("settings.add.repository.comment"))
+                        .component
+                }
+
+                // Path field
+                pathRow = row(KotlinPluginsBundle.message("label.path")) {
+                    @Suppress("UnstableApiUsage")
+                    pathField = textFieldWithBrowseButton()
+                        .applyToComponent {
+                            emptyText.text = KotlinPluginsBundle.message("repository.path.emptyText")
+                            text = if (initial != null && !initial.value.startsWith("http")) initial.value else ""
+
+                            val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                            addBrowseFolderListener(TextBrowseFolderListener(descriptor, project))
+
+                            isEditable = true
+                        }
+                        .align(AlignX.FILL)
+                        .comment(KotlinPluginsBundle.message("settings.add.repository.comment"))
+                        .component
+                }
+            } else {
+                val isUrlSelected = isUrlSelected()
+
+                row(KotlinPluginsBundle.message("label.url")) {
+                    urlField = textField()
+                        .applyToComponent {
+                            emptyText.text = KotlinPluginsBundle.message("repository.url.emptyText")
+                            text = if (isUrlSelected) initial?.value.orEmpty() else ""
+
+                            toolTipText = KotlinPluginsBundle.message("tooltip.defaultRepoUrlNotEditable")
+                            isEditable = false
+                        }
+                        .align(AlignX.FILL)
+                        .comment(KotlinPluginsBundle.message("settings.add.repository.comment"))
+                        .component
+                }.visible(isUrlSelected)
+
+                row(KotlinPluginsBundle.message("label.path")) {
+                    @Suppress("UnstableApiUsage")
+                    pathField = textFieldWithBrowseButton()
+                        .applyToComponent {
+                            emptyText.text = KotlinPluginsBundle.message("repository.path.emptyText")
+                            text = if (!isUrlSelected) initial?.value.orEmpty() else ""
+
+                            toolTipText = KotlinPluginsBundle.message("tooltip.defaultRepoPathNotEditable")
+                            isEditable = false
+                        }
+                        .align(AlignX.FILL)
+                        .comment(KotlinPluginsBundle.message("settings.add.repository.comment"))
+                        .component
+                }.visible(!isUrlSelected)
+            }
+        }
+
+        panel.preferredSize = Dimension(650.scaled, 0.scaled)
+        // Group radios and set initial visibility
+        if (!isDefault) {
+            val group = ButtonGroup()
+            group.add(urlRadio)
+            group.add(pathRadio)
+            val toggle = {
+                urlRow.visible(urlRadio.isSelected)
+                pathRow.visible(pathRadio.isSelected)
+            }
+            toggle()
+            urlRadio.addActionListener { toggle() }
+            pathRadio.addActionListener { toggle() }
+        }
+        return panel
     }
+
+    private fun isUrlSelected(): Boolean = this@RepositoryDialog::urlRadio.isInitialized && urlRadio.isSelected
 
     @Suppress("DuplicatedCode")
     override fun doValidate(): ValidationInfo? {
@@ -631,7 +679,8 @@ private class RepositoryDialog(
             return ValidationInfo(KotlinPluginsBundle.message("validation.name.noSemicolons"), nameField)
         }
 
-        if (urlRadio.isSelected) {
+        val isUrlSelected = isUrlSelected()
+        if (isUrlSelected) {
             val url = urlField.text.trim()
             if (url.isEmpty()) {
                 return ValidationInfo(KotlinPluginsBundle.message("validation.url.empty"), urlField)
@@ -664,11 +713,16 @@ private class RepositoryDialog(
             return null
         }
         val name = nameField.text.trim()
-        val value = if (urlRadio.isSelected) urlField.text.trim() else pathField.text.trim()
+        val isUrlSelected = isUrlSelected()
+        val value = if (isUrlSelected) {
+            urlField.text.trim()
+        } else {
+            pathField.text.trim()
+        }
         return KotlinArtifactsRepository(
             name = name,
             value = value,
-            type = if (urlRadio.isSelected) KotlinArtifactsRepository.Type.URL else KotlinArtifactsRepository.Type.PATH,
+            type = if (isUrlSelected) KotlinArtifactsRepository.Type.URL else KotlinArtifactsRepository.Type.PATH,
         )
     }
 }
@@ -755,10 +809,24 @@ private class PluginsDialog(
         }
     }.createPanel()
 
-    private val versionMatchingField = ComboBox<String>().apply {
-        model = DefaultComboBoxModel(versionMatchingMap.keys.toTypedArray()).apply {
-            val value = initial?.versionMatching ?: KotlinPluginDescriptor.VersionMatching.EXACT
-            versionMatchingMapReversed[value]?.let { selectedItem = it }
+    private val versionMatchingFieldModel = DefaultComboBoxModel(versionMatchingMap.keys.toTypedArray()).apply {
+        val value = initial?.versionMatching ?: KotlinPluginDescriptor.VersionMatching.EXACT
+        versionMatchingMapReversed[value]?.let { selectedItem = it }
+    }
+
+    private val versionMatchingField = panel {
+        row {
+            cell(ComboBox<String>().apply {
+                model = versionMatchingFieldModel
+            })
+            cell(
+                ContextHelpLabel.createWithBrowserLink(
+                    null,
+                    KotlinPluginsBundle.message("settings.add.plugin.version.matching.help"),
+                    KotlinPluginsBundle.message("settings.add.plugin.version.matching.help.link"),
+                    URI("https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md").toURL(),
+                )
+            )
         }
     }
 
@@ -848,9 +916,9 @@ private class PluginsDialog(
 
     companion object {
         private val versionMatchingMap = mapOf(
-            KotlinPluginsBundle.message("version.matching.latest") to KotlinPluginDescriptor.VersionMatching.LATEST,
-            KotlinPluginsBundle.message("version.matching.sameMajor") to KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
             KotlinPluginsBundle.message("version.matching.exact") to KotlinPluginDescriptor.VersionMatching.EXACT,
+            KotlinPluginsBundle.message("version.matching.sameMajor") to KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
+            KotlinPluginsBundle.message("version.matching.latest") to KotlinPluginDescriptor.VersionMatching.LATEST,
         )
 
         val versionMatchingMapReversed = versionMatchingMap.entries
@@ -869,7 +937,7 @@ private class PluginsDialog(
         return KotlinPluginDescriptor(
             name = nameField.text.trim(),
             ids = mutableIds.map { MavenId(it) },
-            versionMatching = versionMatchingMap.getValue(versionMatchingField.model.selectedItem as String),
+            versionMatching = versionMatchingMap.getValue(versionMatchingFieldModel.selectedItem as String),
             enabled = enabledCheckbox.isSelected,
             ignoreExceptions = ignoreExceptionsCheckbox.isSelected,
             repositories = selectedRepos,
