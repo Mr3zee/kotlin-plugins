@@ -1089,12 +1089,20 @@ internal fun getMatching(
         }
 
         KotlinPluginDescriptor.VersionMatching.SAME_MAJOR -> {
-            val major = filter.version.substringBefore(".")
+            val major = filter.version.substringBefore(".").takeIf {
+                it != "0"
+            }
+            val minor = filter.version.substringAfter(".").substringBefore(".")
 
             transformed
                 .map { versionsPerArtifact ->
                     versionsPerArtifact.filter { version ->
-                        version.toString().substringBefore(".") == major
+                        val stringVersion = version.toString()
+                        if (major == null) {
+                            stringVersion.substringAfter(".").substringBefore(".") == minor
+                        } else {
+                            stringVersion.substringBefore(".") == major
+                        }
                     }
                 }
                 .map { it.maxOrNull() }

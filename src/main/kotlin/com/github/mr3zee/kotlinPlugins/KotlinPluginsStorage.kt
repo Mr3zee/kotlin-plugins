@@ -28,6 +28,7 @@ import java.nio.file.WatchKey
 import java.nio.file.Watchable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
@@ -340,8 +341,8 @@ internal class KotlinPluginsStorage(
 
     private suspend fun fileWatcherLoop() {
         val key = withContext(Dispatchers.IO) {
-            watchService.take()
-        }
+            watchService.poll(1000, TimeUnit.MILLISECONDS)
+        } ?: return
 
         if (!key.isValid) {
             return
@@ -947,7 +948,7 @@ internal class KotlinPluginsStorage(
         )
 
         val metadataPath = found.resolveSibling("${found.fileName}.$METADATA_EXTENSION")
-        println(metadataPath.absolutePathString())
+
         val metadata = try {
             if (metadataPath.exists()) {
                 Json.decodeFromString<JarDiskMetadata>(metadataPath.readText())
