@@ -364,7 +364,7 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
     override fun isModified(): Boolean {
         val settingState = project.service<KotlinPluginsSettings>().safeState()
         val analyzerState = project.service<KotlinPluginsExceptionAnalyzerService>().state
-        val treeState = project.service<KotlinPluginTreeStateService>().state
+        val treeState = project.service<KotlinPluginsTreeStateService>().state
 
         return local.isModified(analyzerState, treeState, settingState)
     }
@@ -372,7 +372,7 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
     override fun apply() {
         val settings = project.service<KotlinPluginsSettings>()
         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
-        val treeState = project.service<KotlinPluginTreeStateService>().state
+        val treeState = project.service<KotlinPluginsTreeStateService>().state
 
         local.applyTo(analyzer, treeState, settings)
     }
@@ -380,7 +380,7 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
     override fun reset() {
         val settings = project.service<KotlinPluginsSettings>().safeState()
         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>().state
-        val treeState = project.service<KotlinPluginTreeStateService>().state
+        val treeState = project.service<KotlinPluginsTreeStateService>().state
 
         local.reset(analyzer, treeState, settings)
 

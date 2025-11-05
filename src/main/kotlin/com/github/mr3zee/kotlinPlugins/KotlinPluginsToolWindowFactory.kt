@@ -65,6 +65,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Font
@@ -74,12 +75,15 @@ import java.awt.LayoutManager
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.font.TextAttribute
+import java.nio.file.Path
 import java.util.function.Consumer
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.DefaultListModel
 import javax.swing.Icon
+import javax.swing.JButton
 import javax.swing.JComponent
+import javax.swing.JEditorPane
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
@@ -340,7 +344,7 @@ internal class OverviewPanel(
                 } else {
                     this.exceptionsRepaint = null
                     // Schedule UI update on EDT via project-bound coroutine scope
-                    project.service<KotlinPluginTreeStateService>().treeScope
+                    project.service<KotlinPluginsTreeStateService>().treeScope
                         .launch(Dispatchers.EDT) { render() }
                 }
             }
@@ -491,10 +495,11 @@ internal class OverviewPanel(
 
                                     loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
                                         // Update UI on EDT using the tool window coroutine scope
-                                        project.service<KotlinPluginTreeStateService>().treeScope
+                                        project.service<KotlinPluginsTreeStateService>().treeScope
                                             .launch(Dispatchers.EDT) {
                                                 if (names.isEmpty()) {
-                                                    placeholder?.text = KotlinPluginsBundle.message("analyzed.classes.none")
+                                                    placeholder?.text =
+                                                        KotlinPluginsBundle.message("analyzed.classes.none")
                                                     list?.isVisible = false
                                                 } else {
                                                     placeholder?.isVisible = false
@@ -706,26 +711,27 @@ internal class OverviewPanel(
             return
         }
 
-        project.service<KotlinPluginTreeStateService>().treeScope.launch(CoroutineName("load-fqnames-$jarId")) {
+        project.service<KotlinPluginsTreeStateService>().treeScope.launch(CoroutineName("load-fqnames-$jarId")) {
             val map = project.service<KotlinPluginsExceptionReporter>().lookFor()
             val names = map[jarId].orEmpty()
             onReady(names)
         }
     }
 
-    private fun revealFor(plugin: String, mavenId: String? = null, version: String? = null) {
-        val storage = project.service<KotlinPluginsStorage>()
-        val path = storage.getLocationFor(plugin, mavenId, version)
-        if (path != null) {
-            runCatching {
-                if (path.isDirectory()) {
-                    RevealFileAction.openDirectory(path)
-                } else {
-                    RevealFileAction.openFile(path)
+    private fun revealFor(plugin: String, mavenId: String? = null, version: String? = null) =
+        project.service<KotlinPluginsTreeStateService>().treeScope.launch {
+            val storage = project.service<KotlinPluginsStorage>()
+            val path = storage.getLocationFor(plugin, mavenId, version)
+            if (path != null) {
+                runCatching {
+                    if (path.isDirectory()) {
+                        RevealFileAction.openDirectory(path)
+                    } else {
+                        RevealFileAction.openFile(path)
+                    }
                 }
             }
         }
-    }
 
     private fun exceptionTextAndHighlights(ex: Throwable, highlights: Set<String>): Pair<String, List<IntRange>> {
         val raw = ex.stackTraceToString()
@@ -777,7 +783,7 @@ internal class OverviewPanel(
                     cell(ActionLink(KotlinPluginsBundle.message("link.disableThisPlugin")) {
                         project.service<KotlinPluginsNotifications>().deactivate(plugin)
                         // Refresh editor notifications on EDT via project-bound scope
-                        project.service<KotlinPluginTreeStateService>().treeScope
+                        project.service<KotlinPluginsTreeStateService>().treeScope
                             .launch(Dispatchers.EDT) {
                                 EditorNotifications.getInstance(project).updateAllNotifications()
                             }
@@ -789,7 +795,7 @@ internal class OverviewPanel(
                     cell(ActionLink(KotlinPluginsBundle.message("editor.notification.autoDisable")) {
                         project.service<KotlinPluginsNotifications>().deactivate(plugin)
                         // Refresh editor notifications on EDT via project-bound scope
-                        project.service<KotlinPluginTreeStateService>().treeScope
+                        project.service<KotlinPluginsTreeStateService>().treeScope
                             .launch(Dispatchers.EDT) {
                                 EditorNotifications.getInstance(project).updateAllNotifications()
                             }
@@ -809,10 +815,49 @@ internal class OverviewPanel(
                 hintLabel = label(report.hint()).component
             }
 
+            var button: JButton? = null
+            var loadingIcon: JLabel? = null
+            var openReportAction: ActionLink? = null
+            var reportPath: Path? = null
+            var errorComment: JEditorPane? = null
+
             row {
                 button(KotlinPluginsBundle.message("button.createFailureReport")) {
-                    // todo
-                }
+                    loadingIcon?.isVisible = true
+                    project.service<KotlinPluginsTreeStateService>().treeScope.launch {
+                        reportPath = project.service<KotlinPluginsExceptionReporter>().createReportFile(report)
+
+                        withContext(Dispatchers.EDT) {
+                            loadingIcon?.isVisible = false
+                            if (reportPath != null) {
+                                button?.isEnabled = false
+                                openReportAction?.isVisible = true
+                                // no moving focus
+                                button?.rootPane?.requestFocusInWindow()
+                            } else {
+                                errorComment?.isVisible = true
+                            }
+                        }
+                    }
+                }.comment(KotlinPluginsBundle.message("button.createFailureReport.error"))
+                    .apply {
+                        button = component
+                        errorComment = comment
+                        comment?.isVisible = false
+                        comment?.foreground = JBUI.CurrentTheme.Label.errorForeground()
+                    }
+
+                loadingIcon = icon(AnimatedIcon.Default()).applyToComponent {
+                    isVisible = false
+                }.component
+
+                openReportAction = cell(ActionLink(KotlinPluginsBundle.message("button.openReport")) {
+                    project.service<KotlinPluginsTreeStateService>().treeScope.launch {
+                        reportPath?.let { RevealFileAction.openFile(it) }
+                    }
+                }).applyToComponent {
+                    isVisible = false
+                }.component
             }
 
             separator()
@@ -846,7 +891,7 @@ internal class OverviewPanel(
                             val ed = editorField?.editor
                             if (ed != null) {
                                 // Ensure caret/scroll adjustments run on EDT
-                                project.service<KotlinPluginTreeStateService>().treeScope
+                                project.service<KotlinPluginsTreeStateService>().treeScope
                                     .launch(Dispatchers.EDT) {
                                         // Put caret to the beginning and ensure the top is visible
                                         ed.caretModel.moveToOffset(0)
@@ -884,7 +929,7 @@ internal class OverviewPanel(
             row { cell(exceptionsPanel) }
 
             loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
-                project.service<KotlinPluginTreeStateService>().treeScope
+                project.service<KotlinPluginsTreeStateService>().treeScope
                     .launch(Dispatchers.EDT) {
                         exceptionPanes.forEach { (pane, throwable) ->
                             updateExceptionEditor(pane, throwable, names)
@@ -1119,7 +1164,7 @@ internal class KotlinPluginsTreeState : BaseState() {
 
     companion object {
         fun getInstance(project: Project): KotlinPluginsTreeState =
-            project.service<KotlinPluginTreeStateService>().state
+            project.service<KotlinPluginsTreeStateService>().state
     }
 
     fun select(
@@ -1128,7 +1173,7 @@ internal class KotlinPluginsTreeState : BaseState() {
         mavenId: String? = null,
         version: String? = null,
     ) {
-        project.service<KotlinPluginTreeStateService>().treeScope.launch(Dispatchers.EDT) {
+        project.service<KotlinPluginsTreeStateService>().treeScope.launch(Dispatchers.EDT) {
             try {
                 if (pluginName == null) {
                     selectedNodeKey = null
@@ -1160,7 +1205,7 @@ internal class KotlinPluginsTreeState : BaseState() {
     name = "com.github.mr3zee.kotlinPlugins.KotlinPluginTreeState",
     storages = [Storage(WORKSPACE_FILE)],
 )
-internal class KotlinPluginTreeStateService(
+internal class KotlinPluginsTreeStateService(
     val treeScope: CoroutineScope,
 ) : SimplePersistentStateComponent<KotlinPluginsTreeState>(KotlinPluginsTreeState())
 
@@ -1414,7 +1459,7 @@ internal class KotlinPluginsTree(
     }
 
     private fun updateUi(body: () -> Unit) {
-        project.service<KotlinPluginTreeStateService>().treeScope
+        project.service<KotlinPluginsTreeStateService>().treeScope
             .launch(Dispatchers.EDT) {
                 body()
             }

@@ -1,7 +1,6 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
-import kotlinx.coroutines.Dispatchers
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
@@ -11,11 +10,20 @@ import com.intellij.util.messages.SimpleMessageBusConnection
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
+import java.nio.file.Path
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.io.path.createFile
+import kotlin.io.path.exists
+import kotlin.io.path.writeText
 
 internal data class JarId(
     val pluginName: String,
@@ -35,9 +43,18 @@ internal interface KotlinPluginsExceptionReporter {
     fun hasExceptions(pluginName: String, mavenId: String, version: String): Boolean
 
     fun getExceptionsReport(pluginName: String, mavenId: String, version: String): ExceptionsReport?
+
+    suspend fun createReportFile(report: ExceptionsReport): Path?
 }
 
 internal class ExceptionsReport(
+    val pluginName: String,
+    val mavenId: String,
+    val version: String,
+    val requestedVersion: String,
+    val origin: KotlinArtifactsRepository,
+    val checksum: String,
+
     // The jar is from a local repo
     val isLocal: Boolean,
     // The jar reloaded after to the same one exception occurred
@@ -154,6 +171,8 @@ internal class KotlinPluginsExceptionReporterImpl(
     }
 
     private data class JarMetadata(
+        val requestedVersion: String,
+        val origin: KotlinArtifactsRepository,
         val checksum: String,
         val isLocal: Boolean,
         val kotlinVersionMismatch: KotlinVersionMismatch?,
@@ -223,7 +242,9 @@ internal class KotlinPluginsExceptionReporterImpl(
         return if (old == null || old.checksum != discovery.checksum) {
             ifNew()
             JarMetadata(
+                requestedVersion = discovery.version,
                 checksum = discovery.checksum,
+                origin = discovery.origin,
                 isLocal = discovery.isLocal,
                 kotlinVersionMismatch = discovery.kotlinVersionMismatch,
                 reloadedSame = false,
@@ -231,7 +252,9 @@ internal class KotlinPluginsExceptionReporterImpl(
             )
         } else {
             JarMetadata(
+                requestedVersion = discovery.version,
                 checksum = discovery.checksum,
+                origin = discovery.origin,
                 isLocal = discovery.isLocal,
                 kotlinVersionMismatch = discovery.kotlinVersionMismatch,
                 reloadedSame = true,
@@ -375,6 +398,13 @@ internal class KotlinPluginsExceptionReporterImpl(
             val metadata = metadata[JarId(pluginName, mavenId, version)] ?: return null
 
             ExceptionsReport(
+                pluginName = pluginName,
+                mavenId = mavenId,
+                version = version,
+                requestedVersion = metadata.requestedVersion,
+                origin = metadata.origin,
+                checksum = metadata.checksum,
+
                 exceptions = exceptions.map { it.exception },
                 isLocal = metadata.isLocal,
                 reloadedSame = metadata.reloadedSame,
@@ -382,6 +412,53 @@ internal class KotlinPluginsExceptionReporterImpl(
                 kotlinVersionMismatch = metadata.kotlinVersionMismatch,
                 __exceptionsIds = exceptions.map { it.exceptionId },
             )
+        }
+    }
+
+    override suspend fun createReportFile(report: ExceptionsReport): Path? = runCatching {
+        val storage = project.service<KotlinPluginsStorage>()
+        val reportsDir = storage.reportsDir() ?: return@runCatching null
+
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH-mm-ss")
+            .withZone(ZoneId.systemDefault())
+
+        val nowFormatted = formatter.format(Instant.now())
+
+        val reportFilename = "${report.pluginName}-${report.mavenId}-${report.version}-${nowFormatted}"
+            .replace(":", "-")
+            .replace(".", "-")
+            .plus(".txt")
+
+        val reportFile = reportsDir.resolve(reportFilename)
+
+        withContext(Dispatchers.IO) {
+            if (reportFile.exists()) {
+                reportFile.createFile()
+            }
+
+            reportFile.writeText("""
+KEFS Report for ${report.pluginName} (${report.mavenId})
+
+Kotlin IDE version: ${service<KotlinVersionService>().getKotlinIdePluginVersion()}
+Kotlin version mismatch: ${report.kotlinVersionMismatch ?: "none"}
+Resolved version: ${report.version}
+Requested version: ${report.requestedVersion}
+Origin repository: ${report.origin.value}
+Checksum: ${report.checksum}
+Is probably incompatible: ${report.isProbablyIncompatible}
+
+Exceptions:
+${report.exceptions.joinToString("$NL$NL") { it.stackTraceToString() }}
+            """.trimIndent())
+        }
+
+        reportFile
+    }.let {
+        if (it.isSuccess) {
+            it.getOrThrow()
+        } else {
+            logger.error("Failed to create report file", it.exceptionOrNull())
+            null
         }
     }
 
@@ -435,5 +512,6 @@ internal class KotlinPluginsExceptionReporterImpl(
 
     companion object {
         const val EXCEPTIONS_CACHE_SIZE = 20
+        private val NL = System.lineSeparator()
     }
 }

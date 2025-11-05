@@ -12,6 +12,9 @@ import io.ktor.utils.io.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.io.readByteArray
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.jetbrains.kotlin.config.MavenComparableVersion
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
@@ -49,9 +52,10 @@ internal sealed interface LocatorResult {
         val filter: MatchFilter,
         override val libVersion: String,
         val original: Path? = null,
+        val origin: KotlinArtifactsRepository,
     ) : LocatorResult {
         override val state: ArtifactState.Cached =
-            ArtifactState.Cached(jar, filter.version, libVersion, filter.matching)
+            ArtifactState.Cached(jar, filter.version, libVersion, filter.matching, origin)
     }
 
     class FailedToFetch(
@@ -93,6 +97,7 @@ internal object KotlinPluginsJarLocator {
     private val logId = AtomicLong(0)
 
     internal class ArtifactManifest(
+        val plugin: KotlinPluginDescriptor,
         val artifactId: String,
         val locator: Locator,
         val matchFilter: MatchFilter,
@@ -103,13 +108,17 @@ internal object KotlinPluginsJarLocator {
         val jarClassifier = jarClassifier.takeIf { it.isNotEmpty() }?.let { "-$it" } ?: ""
 
         sealed interface Locator {
+            val origin: KotlinArtifactsRepository
+
             data class ByUrl(
+                override val origin: KotlinArtifactsRepository,
                 val url: String,
             ) : Locator {
                 override fun toString(): String = url
             }
 
             data class ByPath(
+                override val origin: KotlinArtifactsRepository,
                 val path: Path,
             ) : Locator {
                 override fun toString(): String = path.absolutePathString()
@@ -167,7 +176,7 @@ internal object KotlinPluginsJarLocator {
                         val groupUrl = artifact.groupId.replace(".", "/")
                         val artifactUrl = "${repository.value}/$groupUrl/${artifact.artifactId}"
 
-                        ArtifactManifest.Locator.ByUrl(artifactUrl)
+                        ArtifactManifest.Locator.ByUrl(repository, artifactUrl)
                     }
 
                     KotlinArtifactsRepository.Type.PATH -> {
@@ -175,7 +184,7 @@ internal object KotlinPluginsJarLocator {
                             .resolve(artifact.getPluginGroupPath())
                             .resolve(artifact.artifactId)
 
-                        ArtifactManifest.Locator.ByPath(artifactPath)
+                        ArtifactManifest.Locator.ByPath(repository, artifactPath)
                     }
                 }
             }
@@ -229,6 +238,10 @@ internal object KotlinPluginsJarLocator {
                 prefix = "${kotlinIdeVersion}-",
                 filter = matchFilter,
             ) ?: run {
+                val availableVersions = manifestVersions.mapValues { (_, manifestResult) ->
+                    manifestResult.versions.filter { it.startsWith(kotlinIdeVersion) }
+                }
+
                 val notFoundCommonVersion = LocatorResult.NotFound(
                     state = ArtifactState.NotFound(
                         """
@@ -237,7 +250,7 @@ internal object KotlinPluginsJarLocator {
                             |  - Criteria: ${matchFilter.matching}
                             |  - All artifacts in the bundle have the same version.
                             |Available versions: 
-                            |  - ${manifestVersions.entries.joinToString("\n|  - ") { (k, v) -> "${k.id}: ${v.versions}" }}
+                            |  - ${availableVersions.entries.joinToString("\n|  - ") { (k, v) -> "${k.id}: $v" }}
                             |Searched in $repository
                         """.trimMargin()
                     ),
@@ -260,6 +273,7 @@ internal object KotlinPluginsJarLocator {
 
                 for (classifier in setOf("", "for-ide")) {
                     val manifest = ArtifactManifest(
+                        plugin = versioned.descriptor,
                         artifactId = artifact.artifactId,
                         locator = locator,
                         matchFilter = versioned.asMatchFilter(),
@@ -420,6 +434,7 @@ internal object KotlinPluginsJarLocator {
 
         val filename = "${manifest.artifactId}-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
         val plainFilename = "${manifest.artifactId}-$artifactVersion.jar"
+        val metadataFilename = "${manifest.artifactId}-$artifactVersion.jar.$METADATA_EXTENSION"
         val classifiedFilename = "${manifest.artifactId}-$artifactVersion${manifest.jarClassifier}.jar"
 
         val checksumResult = getChecksum(
@@ -446,24 +461,52 @@ internal object KotlinPluginsJarLocator {
         }
 
         val cached = manifest.dest.resolve(plainFilename)
+        val cachedMetadata = manifest.dest.resolve(metadataFilename)
 
         if (io { Files.exists(cached) } && known?.path == cached) {
-            if (known.checksum == checksum) {
-                logger.debug("$logTag A file already exists, matching checksums: ${cached.absolutePathString()}")
-
-                return LocatorResult.Cached(
-                    jar = known,
-                    filter = manifest.matchFilter,
-                    libVersion = libVersion,
-                )
+            val oldMetadata = io {
+                try {
+                    if (cachedMetadata.exists()) {
+                        Json.decodeFromString<JarDiskMetadata>(cachedMetadata.readText())
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
+                    logger.debug("$logTag Failed to read metadata for $cachedMetadata: ${e.message}")
+                    null
+                }
             }
 
-            logger.debug("$logTag A file already exists, but checksums do not match: ${cached.absolutePathString()}")
+            when {
+                known.checksum != checksum -> {
+                    logger.debug("$logTag A file already exists, but checksums do not match: ${cached.absolutePathString()}")
+                }
+
+                oldMetadata == null || manifest.plugin.repositories.none { it.name == oldMetadata.originRepositoryName } -> {
+                    logger.debug(
+                        "$logTag A file already exists, but repository does not match. " +
+                                "Expected on of ${manifest.plugin.repositories.joinToString(", ") { it.name }}, " +
+                                "actual ${oldMetadata?.originRepositoryName ?: "unknown"}: ${cached.absolutePathString()}"
+                    )
+                }
+
+                else -> {
+                    logger.debug("$logTag A file already exists, matching checksums: ${cached.absolutePathString()}")
+
+                    return LocatorResult.Cached(
+                        jar = known,
+                        filter = manifest.matchFilter,
+                        libVersion = libVersion,
+                        origin = manifest.locator.origin,
+                    )
+                }
+            }
         }
 
         return locateArtifactByFullQualifier(
             manifest = manifest,
             filename = filename,
+            metadataFilename = metadataFilename,
             logTag = logTag,
             artifactName = classifiedFilename,
             artifactVersion = artifactVersion,
@@ -494,6 +537,7 @@ internal object KotlinPluginsJarLocator {
                 filter = filter,
                 libVersion = libVersion,
                 original = original,
+                origin = origin,
             )
         } else {
             this
@@ -519,6 +563,7 @@ internal object KotlinPluginsJarLocator {
     private suspend fun locateArtifactByFullQualifier(
         manifest: ArtifactManifest,
         filename: String,
+        metadataFilename: String,
         logTag: String,
         artifactName: String,
         artifactVersion: String,
@@ -550,7 +595,7 @@ internal object KotlinPluginsJarLocator {
         var result: LocatorResult? = null
 
         return try {
-            locateNewArtifact(
+            result = locateNewArtifact(
                 file = file,
                 logTag = logTag,
                 manifest = manifest,
@@ -558,9 +603,31 @@ internal object KotlinPluginsJarLocator {
                 artifactVersion = artifactVersion,
                 libVersion = libVersion,
                 checksum = checksum,
-            ).also {
-                result = it
+            )
+
+            if (result is LocatorResult.Cached) {
+                val jarMetadataFile = manifest.dest.resolve(metadataFilename)
+                val jarMetadata = JarDiskMetadata(manifest.locator.origin.name)
+
+                try {
+                    io {
+                        jarMetadataFile.deleteIfExists()
+                        jarMetadataFile.createFile()
+                        jarMetadataFile.writeText(Json.encodeToString(jarMetadata))
+                    }
+                } catch (e: Exception) {
+                    logger.debug("Failed to create metadata file for $artifactName: ${e::class}: ${e.message}")
+
+                    result = LocatorResult.FailedToFetch(
+                        state = ArtifactState.FailedToFetch(
+                            "Failed to create metadata file for $artifactName: ${e::class}: ${e.message}"
+                        ),
+                        libVersion = libVersion,
+                    )
+                }
             }
+
+            result
         } finally {
             if (result !is LocatorResult.Cached) {
                 io { file.delete() }
@@ -587,6 +654,7 @@ internal object KotlinPluginsJarLocator {
                 libVersion = libVersion,
                 filter = manifest.matchFilter,
                 checksum = checksum,
+                origin = manifest.locator.origin,
             )
 
             is ArtifactManifest.Locator.ByPath -> locateNewArtifactLocally(
@@ -597,6 +665,7 @@ internal object KotlinPluginsJarLocator {
                 libVersion = libVersion,
                 filter = manifest.matchFilter,
                 checksum = checksum,
+                origin = manifest.locator.origin,
             )
         }
     }
@@ -610,6 +679,7 @@ internal object KotlinPluginsJarLocator {
         libVersion: String,
         filter: MatchFilter,
         checksum: String,
+        origin: KotlinArtifactsRepository,
     ): LocatorResult {
         val url = "$artifactUrl/$artifactVersion/$artifactName"
 
@@ -633,6 +703,7 @@ internal object KotlinPluginsJarLocator {
                 jar = Jar(file, checksum, isLocal = false, kotlinVersionMismatch = null),
                 filter = filter,
                 libVersion = libVersion,
+                origin = origin,
             )
 
             is DownloadResult.NotFound -> LocatorResult.NotFound(
@@ -655,6 +726,7 @@ internal object KotlinPluginsJarLocator {
         libVersion: String,
         filter: MatchFilter,
         checksum: String,
+        origin: KotlinArtifactsRepository,
     ): LocatorResult = io {
         val jarPath = artifactPath.resolve(artifactVersion).resolve(artifactName)
 
@@ -698,7 +770,8 @@ internal object KotlinPluginsJarLocator {
             jar = Jar(path = file, checksum = checksum, isLocal = true, kotlinVersionMismatch = null),
             filter = filter,
             libVersion = libVersion,
-            original = jarPath
+            original = jarPath,
+            origin = origin,
         )
     }
 
@@ -979,6 +1052,7 @@ internal fun md5(originalFile: Path): ByteArray =
 internal fun ByteArray.asChecksum(): String = String.format("%032x", BigInteger(1, this))
 
 private const val DOWNLOADING_EXTENSION = "downloading"
+internal const val METADATA_EXTENSION = "metadata.json"
 
 internal data class MatchFilter(
     val version: String,
@@ -1096,3 +1170,8 @@ private suspend inline fun <T> io(crossinline body: suspend () -> T): T {
         body()
     }
 }
+
+@Serializable
+internal data class JarDiskMetadata(
+    val originRepositoryName: String,
+)
