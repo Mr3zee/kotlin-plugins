@@ -4,7 +4,7 @@ This is KEFS in action:
 
 ![kefs-in-action.png](.github/pics/kefs-in-action.png)
 
-This diagnostic is provided by an external compiler plugin. 
+This diagnostic is provided by an external compiler plugin.
 It works stably in IDE thanks to KEFS.
 
 This guide provides a deep dive into all the user-facing settings, diagnostics, and workflows for the KEFS plugin.
@@ -15,13 +15,13 @@ This guide provides a deep dive into all the user-facing settings, diagnostics, 
 
 Kotlin compiler API is not stable and can change at any time.
 This means that compiler plugins that rely on the compiler API may break in between releases.
-It is relatively easy to address this problem for project builds 
+It is relatively easy to address this problem for project builds
 by publishing a new version of the plugin for each stable release of the Kotlin compiler.
 
 It is far more complicated when it comes to running the plugin in the IDE.
 
 IDE **does not** run non-bundled plugins by default.
-It is because the IDE has its own Kotlin compiler that runs inside it 
+It is because the IDE has its own Kotlin compiler that runs inside it
 and provides highlighting information, diagnostics, generated code rendering, etc.
 
 This compiler version is different from the one in a user's project.
@@ -31,7 +31,7 @@ Incompatibility can lead to crashes, incorrect behavior, or unexpected results i
 
 ## 0.1. Solution: KEFS
 
-KEFS is a plugin that knows how to tell Kotlin in the IDE 
+KEFS is a plugin that knows how to tell Kotlin in the IDE
 that it should use a different version of a compiler plugin from the user project.
 
 It can cache, store, analyse, and manage all plugin jars.
@@ -68,9 +68,9 @@ plugins.
 
 ![settings_artifacts.png](.github/pics/settings_artifacts.png)
 
-> Each change to these settings will reload the KEFS state. 
-> This is an inexpensive operation when all plugins are already loaded, but the IDE will need to 
-> lazily re-request all plugins. 
+> Each change to these settings will reload the KEFS state.
+> This is an inexpensive operation when all plugins are already loaded, but the IDE will need to
+> lazily re-request all plugins.
 
 **Maven Repositories**
 This section lists all repositories KEFS will search for compatible plugin jars.
@@ -99,13 +99,8 @@ that work together.
     * **Name:** A unique, human-readable name for the bundle (e.g., `kotlinx-rpc`).
     * **Coordinates:** The Maven coordinates (`groupId:artifactId`) for *each* artifact in the bundle, one
       per line. **Do not include the version.**
-    * **Version matching:** This strategy tells KEFS how to find a compatible version:
-        * **Exact:** The replacement plugin's library version must be identical to the one requested by the
-          project.
-        * **Same Major:** Finds the latest available plugin version that shares the same major version
-          number.
-        * **Latest:** Finds the absolute latest available version of the plugin, regardless of the project's
-          version.
+    * **Version matching:** This strategy tells KEFS how to find a compatible version: *Exact*, *Same Major*,
+      or *Latest*. See [Version Matching](#version-matching) for more details.
     * **Repositories:** A list of repositories from the defined
       above. KEFS will only search for this plugin in the selected repositories.
     * **Enable this plugin in the project:** A master on/off switch for this plugin bundle.
@@ -122,26 +117,81 @@ Editing the default plugin:
 
 #### Storing Settings
 
-When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project. 
+When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project.
 Add it to your VCS so that other developers can use the same workflow.
 
-#### Version Patters
+#### Version Matching
 
 It is important to understand the version matching strategies.
 Each plugin artifact must follow the same version pattern that KEFS understands:
+
 ```
 <groupId>:<artifactId>:<kotlinVersion>-<libraryVersion>
 ```
-Examples: 
+
+Here only `kotlinVersion` and `libraryVersion` are relevant.
+
+`kotlinVersion` is the Kotlin version used to compile the plugin.
+KEFS will replace the project's Kotlin version with the Kotlin version from the IDE.
+
+`libraryVersion` is the version of the plugin itself.
+It can be replaced using one of the following strategies:
+
+* **Exact** – The replaced `libraryVersion` must be identical to the one in the project.
+* **Same Major** – The replaced `libraryVersion` will share the same major version as the one requested (or the same minor for 0.x
+  versions).
+* **Latest** – The replaced `libraryVersion` will be the latest available version.
+
+Loaded versions will be at least the same as the requested one.
+The highest matching version is always used.
+
+Examples:
+
 ```
 # Artifact used in the project
 org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.20-0.10.0
 
-# Artifact that KEFS will find in a repository
+# Artifact that KEFS will try to find in a repository with 'Exact' version matching
 org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.10.0 
+
+# Same Major. Given these artifacts available:
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.10.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.10.1
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.10.2 # this one will be choosen
+
+# Same Major. Given these artifacts available:
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-1.10.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-1.12.1
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-1.20.2 # this one will be choosen
+
+# Latest. Given these artifacts available:
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.10.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.10.1
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-1.1.0 # this one will be choosen
 ```
 
-See more how-to's in the [Developer guide](PLUGIN_AUTHORS.md).
+Note: When more than one artifact is present in a plugin bundle, KEFS will try to find the
+highest version that matches the criteria across all artifacts. 
+If one artifact doesn't have this version – the bundle will be considered as not found.
+
+```
+# Artifact used in the project, bundle of two
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.20-0.10.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common:2.2.20-0.10.0
+
+# Given available artifacts like this and 'Latest' criteria:
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.11.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common:2.2.0-ij251-78-0.11.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.12.0 # this one will be choosen
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common:2.2.0-ij251-78-0.12.0 # this one will be choosen
+
+# But here none will be choosen 
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.11.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common:2.2.0-ij251-78-0.11.0
+org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-k2:2.2.0-ij251-78-0.12.0
+```
+
+See more versions how-to's in the [Developer guide](PLUGIN_AUTHORS.md).
 
 ---
 
@@ -178,7 +228,7 @@ The UI is split into a tree view of plugins on the left and a details panel on t
   ![tools_not_found.png](.github/pics/tools_not_found.png)
 * ** Exception in Runtime:** The plugin threw an exception during runtime. See the
   [Handling Runtime Exceptions](#3-handling-runtime-exceptions) section for more details.
-  ![tools_exception.png](.github/pics/tools_exception.png) 
+  ![tools_exception.png](.github/pics/tools_exception.png)
 
 ---
 
@@ -225,7 +275,7 @@ You can manually control KEFS using the <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A
       corrupt. It does not affect the local disk cache and preserves detected exceptions.
 * **Kotlin FIR External Support: Clear Caches:**
     * **What it does:** Deletes all downloaded plugin jars from the local disk cache (
-      `$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`) for the current IDE's Kotlin version. 
+      `$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`) for the current IDE's Kotlin version.
       This will force KEFS to re-download
       all plugins.
 
@@ -247,10 +297,10 @@ you can create a "hot-reload" workflow.
     * Go to your **Kotlin Plugins** settings and add a new plugin bundle.
     * Ensure your plugin bundle is configured with the correct coordinates and that it is linked to the new local
       repository you just added.
-    * When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project. 
+    * When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project.
       Add it to your VCS so that other developers can use the same workflow.
 3. **Run your build:** Publish your plugin to the local repo.
-4. **Work in the IDE:** KEFS will find, load, and cache your local plugin 
+4. **Work in the IDE:** KEFS will find, load, and cache your local plugin
    (you may need to trigger "Update" manually in some cases).
 5. **Make a change:** Go back to your compiler plugin code, make a change, and **re-publish** it to the local repo.
 6. **See it update:** KEFS's file watchers will detect that the jar file in the local repository has

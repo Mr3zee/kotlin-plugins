@@ -40,6 +40,8 @@ org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-backend:2.2.0-ij251-78-0.10.0
 org.jetbrains.kotlinx:kotlinx-rpc-compiler-plugin-common:2.2.0-ij251-78-0.10.0
 ```
 
+See also: details about [Version Matching](GUIDE.md#version-matching) strategies. 
+
 ## 2. Publishing Compatible Versions
 
 KEFS defines compatibility by the `<kotlin-version>` part in the artifact version.

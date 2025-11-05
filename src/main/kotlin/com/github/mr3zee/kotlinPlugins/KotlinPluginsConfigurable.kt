@@ -8,7 +8,6 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
@@ -26,6 +25,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.RightGap
 import com.intellij.ui.dsl.builder.Row
 import com.intellij.ui.dsl.builder.actionButton
 import com.intellij.ui.dsl.builder.panel
@@ -38,7 +38,6 @@ import java.awt.Dimension
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.net.URI
-import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JComponent
@@ -664,6 +663,10 @@ private class RepositoryDialog(
 
     private fun isUrlSelected(): Boolean = this@RepositoryDialog::urlRadio.isInitialized && urlRadio.isSelected
 
+    override fun continuousValidation(): Boolean {
+        return true
+    }
+
     @Suppress("DuplicatedCode")
     override fun doValidate(): ValidationInfo? {
         val name = nameField.text.trim()
@@ -735,28 +738,6 @@ private class PluginsDialog(
 ) : DialogWrapper(true) {
     private val isDefault = initial?.name in DefaultState.pluginMap
 
-    private val warningLabel = JBLabel(
-        KotlinPluginsBundle.message("plugin.default.cannot.edit"),
-        AllIcons.General.Warning,
-        SwingConstants.LEADING
-    ).apply {
-        foreground = JBUI.CurrentTheme.Label.warningForeground()
-        isVisible = isDefault
-        horizontalAlignment = SwingConstants.CENTER
-    }
-
-    private val nameField = JBTextField(initial?.name.orEmpty(), 30).apply {
-        emptyText.text = KotlinPluginsBundle.message("emptyText.uniqueName")
-
-        minimumSize = Dimension(300.scaled, minimumSize.height)
-
-        toolTipText = if (isDefault) {
-            KotlinPluginsBundle.message("tooltip.defaultPluginNameNotEditable")
-        } else {
-            KotlinPluginsBundle.message("tooltip.nameMustBeUnique")
-        }
-    }
-
     private val mutableIds: ArrayList<String> = ArrayList(initial?.ids.orEmpty().map { it.id })
 
     private val idsModel = ListTableModel<IndexedValue<String>>(
@@ -797,6 +778,10 @@ private class PluginsDialog(
 
             mutableIds.add("")
             idsModel.items = mutableIds.withIndex().toList()
+            val lastRow = idsTable.rowCount - 1
+            if (lastRow >= 0) {
+                idsTable.editCellAt(lastRow, 0)
+            }
         }
 
         setRemoveAction {
@@ -814,40 +799,20 @@ private class PluginsDialog(
         versionMatchingMapReversed[value]?.let { selectedItem = it }
     }
 
-    private val versionMatchingField = panel {
-        row {
-            cell(ComboBox<String>().apply {
-                model = versionMatchingFieldModel
-            })
-            cell(
-                ContextHelpLabel.createWithBrowserLink(
-                    null,
-                    KotlinPluginsBundle.message("settings.add.plugin.version.matching.help"),
-                    KotlinPluginsBundle.message("settings.add.plugin.version.matching.help.link"),
-                    URI("https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md").toURL(),
-                )
-            )
-        }
-    }
+    private lateinit var nameField: JBTextField
 
-    private val enabledCheckbox =
-        JBCheckBox(KotlinPluginsBundle.message("checkbox.enablePluginInProject"), enabledInitial)
-    private val ignoreExceptionsCheckbox =
-        JBCheckBox(KotlinPluginsBundle.message("checkbox.ignorePluginExceptions"), initial?.ignoreExceptions ?: false)
+    // DSL state
+    private var enableInProject: Boolean = enabledInitial
+    private var ignoreExceptions: Boolean = initial?.ignoreExceptions ?: false
 
-    private val repoCheckboxes: List<JBCheckBox> = availableRepositories.map { repo ->
-        JBCheckBox(repo.name, initial?.repositories?.any { it.name == repo.name } == true).apply {
-            toolTipText = repo.value
-            if (isDefault) {
-                toolTipText += " (" + KotlinPluginsBundle.message("tooltip.defaultPluginRepoRefNotEditable") + ")"
-            }
-            isEnabled = !isDefault || DefaultState.pluginMap[initial?.name]!!.repositories.none { it.name == repo.name }
-        }
-    }
+    private val selectedRepoNames: MutableSet<String> = initial?.repositories?.map { it.name }?.toMutableSet()
+        ?: mutableSetOf()
 
-    private val reposContainer = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        repoCheckboxes.forEach { add(it) }
+    private val defaultRepoNames: Set<String> = if (isDefault && initial != null) {
+        DefaultState.pluginMap[initial.name]?.repositories?.map { it.name }?.toSet()
+            ?: emptySet()
+    } else {
+        emptySet()
     }
 
     init {
@@ -857,29 +822,114 @@ private class PluginsDialog(
             KotlinPluginsBundle.message("dialog.plugin.title.edit")
         }
 
-        nameField.isEditable = !isDefault
-
         init()
-        initValidation()
     }
 
     override fun createCenterPanel(): JComponent {
-        val reposPanel = JBScrollPane(reposContainer).apply {
+        // Build repositories list using Kotlin UI DSL and wrap in a scroll pane
+        val reposListPanel = panel {
+            availableRepositories.forEach { repo ->
+                val disabledForDefault = repo.name in defaultRepoNames
+                row {
+                    checkBox(repo.name)
+                        .applyToComponent {
+                            isSelected = selectedRepoNames.contains(repo.name)
+                            toolTipText = if (disabledForDefault) {
+                                repo.value + " (" + KotlinPluginsBundle.message("tooltip.defaultPluginRepoRefNotEditable") + ")"
+                            } else repo.value
+                            addItemListener {
+                                if (isSelected) selectedRepoNames.add(repo.name) else selectedRepoNames.remove(repo.name)
+                            }
+                        }
+                        .enabled(!disabledForDefault)
+                }
+            }
+        }
+
+        val reposPanel = JBScrollPane(reposListPanel).apply {
             minimumSize = Dimension(300.scaled, 120.scaled)
         }
 
-        val form = FormBuilder.createFormBuilder()
-            .addComponent(warningLabel)
-            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.name")), nameField)
-            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.coordinates")), tablePanel)
-            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.version.matching")), versionMatchingField)
-            .addLabeledComponent(JBLabel(KotlinPluginsBundle.message("label.repositories")), reposPanel, 10.scaled)
-            .addComponent(enabledCheckbox)
-            .addComponent(ignoreExceptionsCheckbox)
-            .panel
+        val panel = panel {
+            row {
+                label(KotlinPluginsBundle.message("plugin.default.cannot.edit")).applyToComponent {
+                    icon = AllIcons.General.Warning
+                    foreground = JBUI.CurrentTheme.Label.warningForeground()
+                }.align(AlignX.CENTER)
+            }.visible(isDefault)
 
-        form.preferredSize = Dimension(650.scaled, 0.scaled)
-        return form
+            row(KotlinPluginsBundle.message("label.name")) {
+                nameField = textField().applyToComponent {
+                    emptyText.text = KotlinPluginsBundle.message("emptyText.uniqueName")
+                    text = initial?.name.orEmpty()
+
+                    columns = 30
+                    minimumSize = Dimension(300.scaled, minimumSize.height)
+
+                    isEditable = !isDefault
+
+                    toolTipText = if (isDefault) {
+                        KotlinPluginsBundle.message("tooltip.defaultPluginNameNotEditable")
+                    } else {
+                        KotlinPluginsBundle.message("tooltip.nameMustBeUnique")
+                    }
+                }.component
+            }
+
+            row(KotlinPluginsBundle.message("label.coordinates")) {
+                cell(tablePanel)
+                    .align(AlignX.FILL)
+            }
+
+            row(KotlinPluginsBundle.message("label.version.matching")) {
+                comboBox(versionMatchingFieldModel)
+                cell(
+                    ContextHelpLabel.createWithBrowserLink(
+                        null,
+                        KotlinPluginsBundle.message("settings.add.plugin.version.matching.help"),
+                        KotlinPluginsBundle.message("settings.add.plugin.version.matching.help.link"),
+                        URI("https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md#version-matching").toURL(),
+                    )
+                )
+            }
+
+            row(KotlinPluginsBundle.message("label.repositories")) {
+                cell(reposPanel)
+                    .applyToComponent {
+                        insets.top = 10.scaled
+                    }
+                    .align(AlignX.FILL)
+            }
+
+            gap(RightGap.SMALL)
+            separator()
+            gap(RightGap.SMALL)
+
+            // Options
+            row {
+                checkBox(KotlinPluginsBundle.message("checkbox.enablePluginInProject"))
+                    .applyToComponent {
+                        isSelected = enableInProject
+                        addItemListener { enableInProject = isSelected }
+                    }
+                    .comment(KotlinPluginsBundle.message("checkbox.enablePluginInProject.comment"))
+            }
+            row {
+                checkBox(KotlinPluginsBundle.message("checkbox.ignorePluginExceptions"))
+                    .applyToComponent {
+                        isSelected = ignoreExceptions
+                        addItemListener { ignoreExceptions = isSelected }
+                    }
+                    .comment(KotlinPluginsBundle.message("checkbox.ignorePluginExceptions.comment"))
+            }
+        }
+
+        panel.preferredSize = Dimension(650.scaled, 0.scaled)
+        return panel
+    }
+
+    override fun continuousValidation(): Boolean {
+        return true
     }
 
     @Suppress("DuplicatedCode")
@@ -907,7 +957,7 @@ private class PluginsDialog(
             }
         }
 
-        if (repoCheckboxes.none { it.isSelected }) {
+        if (selectedRepoNames.isEmpty()) {
             return ValidationInfo(KotlinPluginsBundle.message("validation.select.repository"))
         }
 
@@ -930,16 +980,14 @@ private class PluginsDialog(
             return null
         }
 
-        val selectedRepos = availableRepositories.zip(repoCheckboxes)
-            .filter { (_, box) -> box.isSelected }
-            .map { (repo, _) -> repo }
+        val selectedRepos = availableRepositories.filter { it.name in selectedRepoNames }
 
         return KotlinPluginDescriptor(
             name = nameField.text.trim(),
             ids = mutableIds.map { MavenId(it) },
             versionMatching = versionMatchingMap.getValue(versionMatchingFieldModel.selectedItem as String),
-            enabled = enabledCheckbox.isSelected,
-            ignoreExceptions = ignoreExceptionsCheckbox.isSelected,
+            enabled = enableInProject,
+            ignoreExceptions = ignoreExceptions,
             repositories = selectedRepos,
         )
     }
