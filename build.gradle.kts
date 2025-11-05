@@ -9,6 +9,7 @@ import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
 plugins {
     id("java") // Java support
     alias(libs.plugins.kotlin) // Kotlin support
+    alias(libs.plugins.serialization) // Kotlin support
     alias(libs.plugins.intelliJPlatform) // IntelliJ Platform Gradle Plugin
     alias(libs.plugins.changelog) // Gradle Changelog Plugin
     alias(libs.plugins.qodana) // Gradle Qodana Plugin
@@ -41,6 +42,7 @@ repositories {
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
 dependencies {
     implementation(libs.jsoup)
+    implementation(libs.serialization)
 
     testImplementation(libs.junit)
 

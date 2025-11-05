@@ -17,6 +17,7 @@ import com.intellij.util.messages.Topic
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.nio.file.FileSystems
 import java.nio.file.Files
@@ -31,11 +32,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
+import kotlin.io.path.absolutePathString
+import kotlin.io.path.deleteIfExists
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
+import kotlin.io.path.readText
 import kotlin.time.Duration.Companion.minutes
 
 internal sealed interface ArtifactStatus {
@@ -61,6 +65,7 @@ internal sealed interface ArtifactState {
         val requestedVersion: String,
         val actualVersion: String,
         val criteria: KotlinPluginDescriptor.VersionMatching,
+        val origin: KotlinArtifactsRepository,
     ) : ArtifactState
 
     class FailedToFetch(
@@ -81,6 +86,7 @@ private fun ArtifactState.toStatus(): ArtifactStatus {
         is ArtifactState.FailedToFetch -> ArtifactStatus.FailedToLoad(
             KotlinPluginsBundle.message("status.failedToFetch")
         )
+
         is ArtifactState.NotFound -> ArtifactStatus.FailedToLoad(
             KotlinPluginsBundle.message("status.notFound")
         )
@@ -104,7 +110,11 @@ internal interface KotlinPluginStatusUpdater {
 internal class KotlinVersionMismatch(
     val ideVersion: String,
     val jarVersion: String,
-)
+) {
+    override fun toString(): String {
+        return "Used version: $jarVersion, expected version: $ideVersion"
+    }
+}
 
 internal interface KotlinPluginDiscoveryUpdater {
     suspend fun discoveredSync(discovery: Discovery, redrawAfterUpdate: Boolean)
@@ -113,6 +123,8 @@ internal interface KotlinPluginDiscoveryUpdater {
         val pluginName: String,
         val mavenId: String,
         val version: String,
+        val requestedVersion: String,
+        val origin: KotlinArtifactsRepository,
         val jar: Path,
         val checksum: String,
         val isLocal: Boolean,
@@ -129,6 +141,8 @@ internal suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
     pluginName: String,
     mavenId: String,
     version: String,
+    requestedVersion: String,
+    origin: KotlinArtifactsRepository,
     jar: Path,
     checksum: String,
     isLocal: Boolean,
@@ -139,6 +153,8 @@ internal suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
             pluginName = pluginName,
             mavenId = mavenId,
             version = version,
+            requestedVersion = requestedVersion,
+            origin = origin,
             jar = jar,
             checksum = checksum,
             isLocal = isLocal,
@@ -367,7 +383,7 @@ internal class KotlinPluginsStorage(
                 !context.isDirectory() &&
                         name.contains(artifactId) &&
                         name.contains("$kotlinIdeVersion-${jarId.version}") &&
-                        name.endsWith(".jar")
+                        (name.endsWith(".jar"))
             }
 
             if (detected != null) {
@@ -404,7 +420,7 @@ internal class KotlinPluginsStorage(
                     !context.isDirectory() &&
                             plugin.ids.any { name.startsWith(it.artifactId) } &&
                             name.contains("$kotlinIdeVersion-${reversed.version}") &&
-                            (name.endsWith(".jar") || name.endsWith(".link"))
+                            (name.endsWith(".jar") || name.endsWith(".jar.link") || name.endsWith(".jar.$METADATA_EXTENSION"))
                 }
 
                 if (detected.isNotEmpty()) {
@@ -469,6 +485,8 @@ internal class KotlinPluginsStorage(
                     pluginName = pluginName,
                     mavenId = mavenId,
                     version = state.actualVersion,
+                    requestedVersion = state.actualVersion,
+                    origin = state.origin,
                     jar = state.jar.path,
                     checksum = state.jar.checksum,
                     isLocal = state.jar.isLocal,
@@ -634,6 +652,8 @@ internal class KotlinPluginsStorage(
                         pluginName = descriptor.name,
                         mavenId = id.id,
                         version = locatorResult.state.actualVersion,
+                        requestedVersion = locatorResult.state.requestedVersion,
+                        origin = locatorResult.state.origin,
                         jar = locatorResult.jar.path,
                         checksum = locatorResult.jar.checksum,
                         isLocal = locatorResult.jar.isLocal,
@@ -926,11 +946,43 @@ internal class KotlinPluginsStorage(
             kotlinVersionMismatch = kotlinVersionMismatch,
         )
 
+        val metadataPath = found.resolveSibling("${found.fileName}.$METADATA_EXTENSION")
+        println(metadataPath.absolutePathString())
+        val metadata = try {
+            if (metadataPath.exists()) {
+                Json.decodeFromString<JarDiskMetadata>(metadataPath.readText())
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            logger.debug("Failed to read metadata for $found: ${e.message}")
+            null
+        }
+
+        if (metadata == null || requested.descriptor.repositories.none { it.name == metadata.originRepositoryName }) {
+            logger.debug(
+                "Invalid original repository for $found: ${metadata?.originRepositoryName}. " +
+                        "Expected one of: ${requested.descriptor.repositories}"
+            )
+
+            runCatching {
+                metadataPath.deleteIfExists()
+            }
+
+            return@withContext StoredJar(
+                mavenId = requested.artifact.id,
+                locatedVersion = foundVersion,
+                jar = null,
+            )
+        }
+
+        val origin = requested.descriptor.repositories.single { it.name == metadata.originRepositoryName }
         val newState = ArtifactState.Cached(
             jar = jar,
             requestedVersion = requested.version,
             actualVersion = foundVersion,
             criteria = requested.descriptor.versionMatching,
+            origin = origin,
         )
 
         pluginMap[resolvedPlugin] = newState
@@ -938,7 +990,9 @@ internal class KotlinPluginsStorage(
         discoveryPublisher.discoveredSync(
             pluginName = requested.descriptor.name,
             mavenId = requested.artifact.id,
-            version = requested.version,
+            version = foundVersion,
+            requestedVersion = requested.version,
+            origin = origin,
             jar = jar.path,
             checksum = checksum,
             isLocal = jar.isLocal,
@@ -1034,13 +1088,27 @@ internal class KotlinPluginsStorage(
         }
     }
 
+    suspend fun reportsDir(): Path? {
+        val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        return cacheDir()
+            ?.resolve(kotlinIdeVersion)
+            ?.resolve("reports")
+            ?.apply {
+                withContext(Dispatchers.IO) {
+                    createDirectories()
+                }
+            }
+    }
+
     private suspend fun VersionedPluginKey.directory(kotlinIdeVersion: String): Path? {
         return cacheDir()
             ?.resolve(kotlinIdeVersion)
             ?.resolve(pluginName)
             ?.resolve(version)
             ?.apply {
-                createDirectories()
+                withContext(Dispatchers.IO) {
+                    createDirectories()
+                }
             }
     }
 
