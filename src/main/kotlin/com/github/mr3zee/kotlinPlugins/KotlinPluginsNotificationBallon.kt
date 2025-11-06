@@ -3,7 +3,6 @@ package com.github.mr3zee.kotlinPlugins
 import com.intellij.notification.Notification
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
-import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.Project
 
@@ -12,7 +11,7 @@ internal object KotlinPluginsNotificationBallon {
         project: Project,
         disabledPlugin: String,
         mavenId: String?,
-        version: String?,
+        requestedVersion: RequestedVersion?,
     ) {
         NotificationGroupManager.getInstance()
             .getNotificationGroup("kotlin.external.fir.support")
@@ -33,7 +32,7 @@ internal object KotlinPluginsNotificationBallon {
                     e.project?.let {
                         KotlinPluginsTreeState
                             .getInstance(it)
-                            .select(project, disabledPlugin, mavenId, version)
+                            .select(project, PartialJarId(disabledPlugin, mavenId, requestedVersion))
 
                         showKotlinPluginsToolWindow(it)
                     }

@@ -138,7 +138,7 @@ internal class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
             val node = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)
             val data = node?.userObject as? NodeData ?: return@addTreeSelectionListener
             val key = data.key
-            state.selectedNodeKey = key
+            state.updateSelectionFromListener(key)
             overviewPanel.updater.redraw()
         }
         // initial paint
@@ -310,8 +310,13 @@ internal class OverviewPanel(
             refreshIfAffectsSelection(pluginName, mavenId)
         }
 
-        override fun updateVersion(pluginName: String, mavenId: String, version: String, status: ArtifactStatus) {
-            refreshIfAffectsSelection(pluginName, mavenId, version)
+        override fun updateVersion(
+            pluginName: String,
+            mavenId: String,
+            requestedVersion: RequestedVersion,
+            status: ArtifactStatus,
+        ) {
+            refreshIfAffectsSelection(pluginName, mavenId, requestedVersion)
         }
 
         override fun reset() {
@@ -330,14 +335,17 @@ internal class OverviewPanel(
 
     private var exceptionsRepaint: (() -> Unit)? = null
 
-    private fun refreshIfAffectsSelection(pluginName: String, mavenId: String? = null, version: String? = null) {
-        val selectedKey = state.selectedNodeKey
-        val (p, m, v) = parseKey(selectedKey)
-        if (p == null) return
-        if (p != pluginName) return
-        if (mavenId == null || m == null || mavenId == m) {
-            if (version == null || v == null || version == v) {
-                val status = tree.statusForKey(selectedKey)
+    private fun refreshIfAffectsSelection(
+        pluginName: String,
+        mavenId: String? = null,
+        requestedVersion: RequestedVersion? = null,
+    ) {
+        val partial = state.getSelectedNodeKey(tree.keys())
+        if (partial.pluginName == null) return
+        if (partial.pluginName != pluginName) return
+        if (mavenId == null || partial.mavenId == null || mavenId == partial.mavenId) {
+            if (requestedVersion == null || partial.requested == null || requestedVersion == partial.requested) {
+                val status = tree.statusForKey(partial)
                 val exceptionsRepaint = exceptionsRepaint
                 if (status is ArtifactStatus.ExceptionInRuntime && exceptionsRepaint != null) {
                     exceptionsRepaint()
@@ -351,21 +359,10 @@ internal class OverviewPanel(
         }
     }
 
-    private fun parseKey(key: String?): Triple<String?, String?, String?> {
-        if (key == null) return Triple(null, null, null)
-        val parts = key.split("::")
-        return when (parts.size) {
-            1 -> Triple(parts[0], null, null)
-            2 -> Triple(parts[0], parts[1], null)
-            else -> Triple(parts[0], parts[1], parts[2])
-        }
-    }
-
     private fun render() {
         exceptionsRepaint = null
-        val selectedKey = state.selectedNodeKey
-        val status = tree.statusForKey(selectedKey)
-        val (plugin, mavenId, version) = parseKey(selectedKey)
+        val partial = state.getSelectedNodeKey(tree.keys())
+        val status = tree.statusForKey(partial)
 
         val parentPanel = JPanel(BorderLayout()).apply {
             border = BorderFactory.createEmptyBorder(0, 0, 0, 0)
@@ -398,36 +395,35 @@ internal class OverviewPanel(
         }
 
         when {
-            plugin == null -> {
+            partial.pluginName == null -> {
                 addRoot(GrayedLabel(KotlinPluginsBundle.message("details.selectPlugin")), BorderLayout.CENTER)
                     .align(SwingConstants.CENTER)
             }
 
-            mavenId == null -> {
+            partial.mavenId == null -> {
                 addRoot(
                     component = header(
                         type = NodeType.Plugin,
                         status = status,
-                        plugin = plugin,
+                        partial = partial,
                     ),
                     constraints = BorderLayout.NORTH,
                 )
 
-                addRoot(pluginVersionPanels(NodeType.Plugin, status, plugin))
+                addRoot(pluginVersionPanels(NodeType.Plugin, status, partial.pluginName))
             }
 
-            version == null -> {
+            partial.requested == null -> {
                 addRoot(
                     component = header(
                         type = NodeType.Artifact,
                         status = status,
-                        plugin = plugin,
-                        mavenId = mavenId,
+                        partial = partial,
                     ),
                     constraints = BorderLayout.NORTH,
                 )
 
-                addRoot(pluginVersionPanels(NodeType.Artifact, status, plugin))
+                addRoot(pluginVersionPanels(NodeType.Artifact, status, partial.pluginName))
             }
 
             else -> {
@@ -435,9 +431,7 @@ internal class OverviewPanel(
                     component = header(
                         type = NodeType.Version,
                         status = status,
-                        plugin = plugin,
-                        mavenId = mavenId,
-                        version = version,
+                        partial = partial,
                     ),
                     constraints = BorderLayout.NORTH,
                 )
@@ -448,7 +442,7 @@ internal class OverviewPanel(
                     }
 
                     ArtifactStatus.Disabled -> {
-                        addRoot(disabledPanel(NodeType.Version, plugin))
+                        addRoot(disabledPanel(NodeType.Version, partial.pluginName))
                     }
 
                     ArtifactStatus.Skipped -> {
@@ -460,6 +454,16 @@ internal class OverviewPanel(
                     }
 
                     is ArtifactStatus.Success, is ArtifactStatus.ExceptionInRuntime -> {
+                        val resolvedVersions = partial.resolved
+                            ?: error("Resolved version can't be null for Success and ExceptionInRuntime statuses: $partial")
+
+                        val jarId = JarId(
+                            pluginName = partial.pluginName,
+                            mavenId = partial.mavenId,
+                            requestedVersion = partial.requested,
+                            resolvedVersion = resolvedVersions,
+                        )
+
                         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
                         if (analyzer.state.enabled) {
                             addRootPanel(customiseComponent = {
@@ -468,7 +472,7 @@ internal class OverviewPanel(
                                 it.preferredSize.width = 600.scaled
                                 it.preferredSize.height = 270.scaled
                             }) {
-                                exceptionsRepaint = exceptionsPanel(plugin, mavenId, version, status)
+                                exceptionsRepaint = exceptionsPanel(jarId, status)
 
                                 if (status is ArtifactStatus.ExceptionInRuntime || status is ArtifactStatus.Success) {
                                     val model = DefaultListModel<String>()
@@ -493,7 +497,7 @@ internal class OverviewPanel(
                                             grayed(KotlinPluginsBundle.message("analyzed.classes.loading")).component
                                     }
 
-                                    loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
+                                    loadFqNamesAsync(jarId) { names ->
                                         // Update UI on EDT using the tool window coroutine scope
                                         project.service<KotlinPluginsTreeStateService>().treeScope
                                             .launch(Dispatchers.EDT) {
@@ -528,7 +532,7 @@ internal class OverviewPanel(
 
                     is ArtifactStatus.FailedToLoad -> {
                         val sanitizedMessage = project.service<KotlinPluginsStorage>()
-                            .getFailureMessageFor(plugin, mavenId, version)
+                            .getFailedToFetchMessageFor(partial.pluginName, partial.mavenId, partial.requested)
                             ?: KotlinPluginsBundle.message("error.unknown.reason")
 
                         addRootPanel(
@@ -586,14 +590,16 @@ internal class OverviewPanel(
 
     private fun openCacheLink(
         isFile: Boolean,
-        plugin: String,
-        mavenId: String? = null,
-        version: String? = null,
+        partial: PartialJarId,
     ): ActionLink {
         return if (isFile) {
-            ActionLink(KotlinPluginsBundle.message("link.showInCacheDir")) { revealFor(plugin, mavenId, version) }
+            ActionLink(KotlinPluginsBundle.message("link.showInCacheDir")) {
+                revealFor(partial)
+            }
         } else {
-            ActionLink(KotlinPluginsBundle.message("link.showCacheDir")) { revealFor(plugin, mavenId, version) }
+            ActionLink(KotlinPluginsBundle.message("link.showCacheDir")) {
+                revealFor(partial)
+            }
         }.apply {
             icon = AllIcons.General.OpenDisk
         }
@@ -602,9 +608,7 @@ internal class OverviewPanel(
     private fun header(
         type: NodeType,
         status: ArtifactStatus?,
-        plugin: String,
-        mavenId: String? = null,
-        version: String? = null,
+        partial: PartialJarId,
     ): JComponent {
         return JPanel(BorderLayout()).apply {
             val insets = JBUI.CurrentTheme.Toolbar.horizontalToolbarInsets() ?: JBUI.insets(5, 7)
@@ -621,7 +625,7 @@ internal class OverviewPanel(
             if (status != null && (status is ArtifactStatus.Success || status is ArtifactStatus.ExceptionInRuntime)) {
                 add(Box.createRigidArea(JBUI.size(8, 0)), BorderLayout.CENTER)
 
-                add(openCacheLink(type == NodeType.Version, plugin, mavenId, version), BorderLayout.LINE_END)
+                add(openCacheLink(type == NodeType.Version, partial), BorderLayout.LINE_END)
             }
         }
     }
@@ -718,20 +722,19 @@ internal class OverviewPanel(
         }
     }
 
-    private fun revealFor(plugin: String, mavenId: String? = null, version: String? = null) =
-        project.service<KotlinPluginsTreeStateService>().treeScope.launch {
-            val storage = project.service<KotlinPluginsStorage>()
-            val path = storage.getLocationFor(plugin, mavenId, version)
-            if (path != null) {
-                runCatching {
-                    if (path.isDirectory()) {
-                        RevealFileAction.openDirectory(path)
-                    } else {
-                        RevealFileAction.openFile(path)
-                    }
+    private fun revealFor(partial: PartialJarId) = project.service<KotlinPluginsTreeStateService>().treeScope.launch {
+        val storage = project.service<KotlinPluginsStorage>()
+        val path = storage.getLocationFor(partial)
+        if (path != null) {
+            runCatchingExceptCancellation {
+                if (path.isDirectory()) {
+                    RevealFileAction.openDirectory(path)
+                } else {
+                    RevealFileAction.openFile(path)
                 }
             }
         }
+    }
 
     private fun exceptionTextAndHighlights(ex: Throwable, highlights: Set<String>): Pair<String, List<IntRange>> {
         val raw = ex.stackTraceToString()
@@ -762,13 +765,11 @@ internal class OverviewPanel(
     }
 
     private fun Panel.exceptionsPanel(
-        plugin: String,
-        mavenId: String,
-        version: String,
+        jarId: JarId,
         status: ArtifactStatus?,
-    ): () -> Unit {
+    ): (() -> Unit)? {
         val reporter = project.service<KotlinPluginsExceptionReporter>()
-        val report = reporter.getExceptionsReport(plugin, mavenId, version)
+        val report = reporter.getExceptionsReport(jarId)
         var hintLabel: JLabel? = null
         var exceptionsPanel: JComponent? = null
 
@@ -778,10 +779,10 @@ internal class OverviewPanel(
                     .comment(KotlinPluginsBundle.message("exceptions.runtime.tipHtml"))
             }
 
-            if (project.service<KotlinPluginsSettings>().isEnabled(plugin)) {
+            if (project.service<KotlinPluginsSettings>().isEnabled(jarId.pluginName)) {
                 row {
                     cell(ActionLink(KotlinPluginsBundle.message("link.disableThisPlugin")) {
-                        project.service<KotlinPluginsNotifications>().deactivate(plugin)
+                        project.service<KotlinPluginsNotifications>().deactivate(jarId.pluginName)
                         // Refresh editor notifications on EDT via project-bound scope
                         project.service<KotlinPluginsTreeStateService>().treeScope
                             .launch(Dispatchers.EDT) {
@@ -789,11 +790,11 @@ internal class OverviewPanel(
                             }
 
                         project.service<KotlinPluginsSettings>()
-                            .disablePlugin(plugin)
+                            .disablePlugin(jarId.pluginName)
                     })
 
                     cell(ActionLink(KotlinPluginsBundle.message("editor.notification.autoDisable")) {
-                        project.service<KotlinPluginsNotifications>().deactivate(plugin)
+                        project.service<KotlinPluginsNotifications>().deactivate(jarId.pluginName)
                         // Refresh editor notifications on EDT via project-bound scope
                         project.service<KotlinPluginsTreeStateService>().treeScope
                             .launch(Dispatchers.EDT) {
@@ -804,7 +805,7 @@ internal class OverviewPanel(
                             .updateState(enabled = true, autoDisable = true)
 
                         project.service<KotlinPluginsSettings>()
-                            .disablePlugin(plugin)
+                            .disablePlugin(jarId.pluginName)
                     })
                 }
             }
@@ -928,7 +929,7 @@ internal class OverviewPanel(
 
             row { cell(exceptionsPanel) }
 
-            loadFqNamesAsync(JarId(plugin, mavenId, version)) { names ->
+            loadFqNamesAsync(jarId) { names ->
                 project.service<KotlinPluginsTreeStateService>().treeScope
                     .launch(Dispatchers.EDT) {
                         exceptionPanes.forEach { (pane, throwable) ->
@@ -938,7 +939,7 @@ internal class OverviewPanel(
             }
 
             separator()
-        } else if (status == ArtifactStatus.ExceptionInRuntime && report == null) {
+        } else if (status is ArtifactStatus.ExceptionInRuntime) {
             row {
                 label(KotlinPluginsBundle.message("exceptions.show.failed"))
                     .comment(KotlinPluginsBundle.message("exceptions.show.failed.tip"))
@@ -947,14 +948,18 @@ internal class OverviewPanel(
             separator()
         }
 
+        if (exceptionsPanel == null) {
+            return null
+        }
+
         return {
             val reporter = project.service<KotlinPluginsExceptionReporter>()
-            val newReport = reporter.getExceptionsReport(plugin, mavenId, version)
+            val newReport = reporter.getExceptionsReport(jarId)
 
             if (newReport != report) {
                 if (newReport?.__exceptionsIds != report?.__exceptionsIds) {
-                    exceptionsPanel?.revalidate()
-                    exceptionsPanel?.repaint()
+                    exceptionsPanel.revalidate()
+                    exceptionsPanel.repaint()
                 }
 
                 hintLabel?.revalidate()
@@ -963,7 +968,6 @@ internal class OverviewPanel(
         }
     }
 
-    @Suppress("JComponentDataProvider")
     private class ExceptionEditorTextField(
         text: String,
         project: Project,
@@ -1095,7 +1099,7 @@ internal class OverviewPanel(
 private class NodeData(
     project: Project,
     val parent: NodeData?,
-    val key: String,
+    val key: PartialJarId,
     @NlsContexts.Label var label: String,
     var status: ArtifactStatus,
     val type: NodeType,
@@ -1122,14 +1126,14 @@ private class NodeData(
         if (type == NodeType.Version) {
             when (val status = status) {
                 is ArtifactStatus.Success -> {
-                    if (status.actualVersion == status.requestedVersion) {
-                        addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    if (status.requestedVersion.value == status.resolvedVersion.value) {
+                        addText(status.resolvedVersion.value, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                         addText(
                             " ${KotlinPluginDescriptor.VersionMatching.EXACT.toUi()}",
                             SimpleTextAttributes.GRAYED_ATTRIBUTES
                         )
                     } else {
-                        addText(status.actualVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                        addText(status.resolvedVersion.value, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                         addText(
                             " " + KotlinPluginsBundle.message(
                                 "tree.version.grayText",
@@ -1157,7 +1161,22 @@ internal class KotlinPluginsTreeState : BaseState() {
     var showSucceeded: Boolean by property(true)
     var showSkipped: Boolean by property(true)
 
-    var selectedNodeKey: String? by string(null)
+    // not persisted
+    private var selectedNodeKey: PartialJarId = PartialJarId()
+
+    fun getSelectedNodeKey(lookup: Set<PartialJarId>): PartialJarId {
+        return (lookup.find { it == selectedNodeKey } ?: PartialJarId()).also {
+            selectedNodeKey = it
+        }
+    }
+
+    fun removeSelection() {
+        selectedNodeKey = PartialJarId()
+    }
+
+    fun updateSelectionFromListener(key: PartialJarId) {
+        selectedNodeKey = key
+    }
 
     var showClearCachesDialog: Boolean by property(true)
     var softWrapErrorMessages: Boolean by property(true)
@@ -1167,21 +1186,15 @@ internal class KotlinPluginsTreeState : BaseState() {
             project.service<KotlinPluginsTreeStateService>().state
     }
 
-    fun select(
-        project: Project,
-        pluginName: String? = null,
-        mavenId: String? = null,
-        version: String? = null,
-    ) {
+    fun select(project: Project, partial: PartialJarId) {
         project.service<KotlinPluginsTreeStateService>().treeScope.launch(Dispatchers.EDT) {
             try {
-                if (pluginName == null) {
-                    selectedNodeKey = null
+                if (partial.pluginName == null) {
+                    selectedNodeKey = PartialJarId()
                     return@launch
                 }
 
-                val key = nodeKey(pluginName, mavenId, version)
-                selectedNodeKey = key
+                selectedNodeKey = partial
             } finally {
                 actions.forEach { it() }
             }
@@ -1220,7 +1233,7 @@ internal class KotlinPluginsTree(
         NodeData(
             project = project,
             parent = null,
-            key = "root",
+            key = PartialJarId(),
             label = "Root",
             status = ArtifactStatus.InProgress,
             type = NodeType.Plugin,
@@ -1229,10 +1242,12 @@ internal class KotlinPluginsTree(
 
     private val model = DefaultTreeModel(rootNode)
 
-    private val nodesByKey: MutableMap<String, DefaultMutableTreeNode> = mutableMapOf()
+    private val nodesByKey: MutableMap<PartialJarId, DefaultMutableTreeNode> = mutableMapOf()
 
-    fun statusForKey(key: String?): ArtifactStatus? {
-        if (key == null) {
+    fun keys() = nodesByKey.keys.toSet()
+
+    fun statusForKey(key: PartialJarId): ArtifactStatus? {
+        if (key.pluginName == null) {
             return null
         }
 
@@ -1290,13 +1305,13 @@ internal class KotlinPluginsTree(
 
         val plugins = settings.safeState().plugins
 
-        val selectedNodeKey = state.selectedNodeKey
+        val selectedNodeKey = state.getSelectedNodeKey(nodesByKey.keys)
         var selectedNode: DefaultMutableTreeNode? = null
 
         for (plugin in plugins) {
             val rootData = rootNode.userObject as NodeData
 
-            val pluginKey = nodeKey(plugin.name)
+            val pluginKey = PartialJarId(plugin.name)
             val pluginNodeData = nodesByKey[pluginKey]?.data ?: NodeData(
                 project = project,
                 parent = rootData,
@@ -1310,10 +1325,10 @@ internal class KotlinPluginsTree(
 
             // children: maven ids
             val artifactNodes = plugin.ids.map { id ->
-                val artifactKey = nodeKey(plugin.name, id.id)
+                val artifactKey = PartialJarId(plugin.name, id.id)
 
                 val versionNodes = nodesByKey.entries.filter { (k, _) ->
-                    k.startsWith(artifactKey) && k != artifactKey
+                    k.pluginName == artifactKey.pluginName && k.mavenId == artifactKey.mavenId && k != artifactKey
                 }.map { (k, v) ->
                     val versionNode = DefaultMutableTreeNode(v.data)
                     nodesByKey[k] = versionNode
@@ -1376,13 +1391,13 @@ internal class KotlinPluginsTree(
         // root status handled separately
         val rootData = rootNode.userObject as NodeData
         rootData.status = ArtifactStatus.Success(
-            requestedVersion = "",
-            actualVersion = "",
+            requestedVersion = "".requested(),
+            resolvedVersion = "".resolved(),
             criteria = KotlinPluginDescriptor.VersionMatching.EXACT,
         )
 
-        if (selectedNodeKey != null && selectedNodeKey !in nodesByKey.keys) {
-            state.selectedNodeKey = null
+        if (selectedNodeKey.pluginName != null && selectedNodeKey !in nodesByKey.keys) {
+            state.removeSelection()
         }
 
         model.reload()
@@ -1433,12 +1448,12 @@ internal class KotlinPluginsTree(
         override fun updateVersion(
             pluginName: String,
             mavenId: String,
-            version: String,
+            requestedVersion: RequestedVersion,
             status: ArtifactStatus,
         ) = updateUi {
-            this@KotlinPluginsTree.updateVersion(pluginName, mavenId, version, status)
+            this@KotlinPluginsTree.updateVersion(pluginName, mavenId, requestedVersion, status)
 
-            overviewPanel?.updater?.updateVersion(pluginName, mavenId, version, status)
+            overviewPanel?.updater?.updateVersion(pluginName, mavenId, requestedVersion, status)
         }
 
         override fun reset() = updateUi {
@@ -1466,7 +1481,7 @@ internal class KotlinPluginsTree(
     }
 
     private fun updatePlugin(pluginName: String, status: ArtifactStatus) {
-        val key = nodeKey(pluginName)
+        val key = PartialJarId(pluginName)
 
         val pluginNode = nodesByKey[key]
         if (pluginNode != null) {
@@ -1479,7 +1494,7 @@ internal class KotlinPluginsTree(
     }
 
     private fun updateArtifact(pluginName: String, mavenId: String, status: ArtifactStatus) {
-        val key = nodeKey(pluginName, mavenId)
+        val key = PartialJarId(pluginName, mavenId)
 
         val artifactNode = nodesByKey[key]
         if (artifactNode != null) {
@@ -1492,8 +1507,26 @@ internal class KotlinPluginsTree(
         }
     }
 
-    private fun updateVersion(pluginName: String, mavenId: String, version: String, status: ArtifactStatus) {
-        val key = nodeKey(pluginName, mavenId, version)
+    private fun updateVersion(
+        pluginName: String,
+        mavenId: String,
+        requestedVersion: RequestedVersion,
+        status: ArtifactStatus,
+    ) {
+        val key = when (status) {
+            is ArtifactStatus.Success -> {
+                PartialJarId(pluginName, mavenId, requestedVersion, status.resolvedVersion)
+            }
+
+            is ArtifactStatus.ExceptionInRuntime -> {
+                PartialJarId(pluginName, mavenId, requestedVersion, status.jarId.resolvedVersion)
+            }
+
+            else -> {
+                PartialJarId(pluginName, mavenId, requestedVersion)
+            }
+        }
+
         var new = false
 
         val versionNode = nodesByKey[key] ?: run {
@@ -1501,9 +1534,9 @@ internal class KotlinPluginsTree(
             DefaultMutableTreeNode(
                 NodeData(
                     project = project,
-                    parent = nodesByKey[nodeKey(pluginName, mavenId)]?.data,
+                    parent = nodesByKey[PartialJarId(pluginName, mavenId)]?.data,
                     key = key,
-                    label = version,
+                    label = key.resolved?.value ?: requestedVersion.value,
                     status = status,
                     type = NodeType.Version,
                 )
@@ -1566,32 +1599,12 @@ internal class KotlinPluginsTree(
     }
 }
 
-private fun nodeKey(pluginName: String, mavenId: String? = null, version: String? = null): String {
-    if (mavenId == null && version != null) {
-        error("MavenId is null, but version is not null, $version, $pluginName")
-    }
-
-    return when {
-        version != null -> {
-            "$pluginName::$mavenId::$version"
-        }
-
-        mavenId != null -> {
-            "$pluginName::$mavenId"
-        }
-
-        else -> {
-            pluginName
-        }
-    }
-}
-
 private fun statusToIcon(status: ArtifactStatus) = when (status) {
     is ArtifactStatus.Success -> AllIcons.RunConfigurations.TestPassed
     is ArtifactStatus.PartialSuccess -> AllIcons.RunConfigurations.TestPassedIgnored
     ArtifactStatus.InProgress -> AnimatedIcon.Default()
     is ArtifactStatus.FailedToLoad -> AllIcons.RunConfigurations.TestFailed
-    ArtifactStatus.ExceptionInRuntime -> AllIcons.RunConfigurations.TestError
+    is ArtifactStatus.ExceptionInRuntime -> AllIcons.RunConfigurations.TestError
     ArtifactStatus.Disabled -> AllIcons.RunConfigurations.TestSkipped
     ArtifactStatus.Skipped -> AllIcons.RunConfigurations.TestIgnored
 }
@@ -1608,7 +1621,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
         is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.plugin.partial")
         ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.plugin.inProgress")
         is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.plugin.failed")
-        ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.plugin.exception")
+        is ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.plugin.exception")
         ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.plugin.disabled")
         ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.plugin.skipped")
     }
@@ -1618,20 +1631,20 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
         is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.artifact.partial")
         ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.artifact.inProgress")
         is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.artifact.failed")
-        ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.artifact.exception")
+        is ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.artifact.exception")
         ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.artifact.disabled")
         ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.artifact.skipped")
     }
 
     NodeType.Version -> when (status) {
         is ArtifactStatus.Success -> {
-            if (status.actualVersion == status.requestedVersion) {
+            if (status.resolvedVersion.value == status.requestedVersion.value) {
                 KotlinPluginsBundle.message("tooltip.version.success.exact")
             } else {
                 KotlinPluginsBundle.message(
                     "tooltip.version.success.mismatch",
-                    status.requestedVersion,
-                    status.actualVersion,
+                    status.requestedVersion.value,
+                    status.resolvedVersion.value,
                     status.criteria,
                 )
             }
@@ -1640,7 +1653,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
         is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.version.partial")
         ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.version.inProgress")
         is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.version.failed", status.shortMessage)
-        ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.version.exception")
+        is ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.version.exception")
         ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.version.disabled")
         ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.version.skipped")
     }
@@ -1652,7 +1665,7 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
     }
 
     if (children.all { it.status is ArtifactStatus.Success }) {
-        return ArtifactStatus.Success("", "", KotlinPluginDescriptor.VersionMatching.EXACT)
+        return children.first { it.status is ArtifactStatus.Success }.status
     }
 
     if (children.any { it.status == ArtifactStatus.InProgress }) {
@@ -1663,8 +1676,8 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
         return ArtifactStatus.FailedToLoad("")
     }
 
-    if (children.any { it.status == ArtifactStatus.ExceptionInRuntime }) {
-        return ArtifactStatus.ExceptionInRuntime
+    if (children.any { it.status is ArtifactStatus.ExceptionInRuntime }) {
+        return children.first { it.status is ArtifactStatus.ExceptionInRuntime }.status
     }
 
     if (children.any { it.status == ArtifactStatus.PartialSuccess }) {

@@ -81,10 +81,10 @@ internal class KotlinPluginsEditorNotificationProvider : EditorNotificationProvi
 
                 val jarIdOrNull = pluginOrNull?.let { grouped[it]?.singleOrNull() }
                 val mavenIdOrNull = jarIdOrNull?.mavenId
-                val versionOrNull = jarIdOrNull?.version
+                val requestedVersionOrNull = jarIdOrNull?.requestedVersion
 
                 KotlinPluginsTreeState.getInstance(project)
-                    .select(project, pluginOrNull, mavenIdOrNull, versionOrNull)
+                    .select(project, PartialJarId(pluginOrNull, mavenIdOrNull, requestedVersionOrNull))
 
                 showKotlinPluginsToolWindow(project)
             }

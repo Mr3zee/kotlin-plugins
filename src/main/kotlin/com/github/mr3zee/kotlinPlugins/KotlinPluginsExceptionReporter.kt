@@ -6,7 +6,6 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorNotifications
-import com.intellij.util.messages.SimpleMessageBusConnection
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -25,13 +24,7 @@ import kotlin.io.path.createFile
 import kotlin.io.path.exists
 import kotlin.io.path.writeText
 
-internal data class JarId(
-    val pluginName: String,
-    val mavenId: String,
-    val version: String,
-)
-
-internal interface KotlinPluginsExceptionReporter {
+internal interface KotlinPluginsExceptionReporter : KotlinPluginDiscoveryUpdater {
     fun start()
 
     fun stop()
@@ -40,9 +33,9 @@ internal interface KotlinPluginsExceptionReporter {
 
     fun matched(ids: List<JarId>, exception: Throwable, autoDisable: Boolean, isProbablyIncompatible: Boolean)
 
-    fun hasExceptions(pluginName: String, mavenId: String, version: String): Boolean
+    fun hasExceptions(pluginName: String, mavenId: String, requestedVersion: RequestedVersion): Boolean
 
-    fun getExceptionsReport(pluginName: String, mavenId: String, version: String): ExceptionsReport?
+    fun getExceptionsReport(jarId: JarId): ExceptionsReport?
 
     suspend fun createReportFile(report: ExceptionsReport): Path?
 }
@@ -50,8 +43,8 @@ internal interface KotlinPluginsExceptionReporter {
 internal class ExceptionsReport(
     val pluginName: String,
     val mavenId: String,
-    val version: String,
-    val requestedVersion: String,
+    val requestedVersion: RequestedVersion,
+    val resolvedVersion: ResolvedVersion,
     val origin: KotlinArtifactsRepository,
     val checksum: String,
 
@@ -96,50 +89,21 @@ internal class ExceptionsReport(
 internal class KotlinPluginsExceptionReporterImpl(
     val project: Project,
     val scope: CoroutineScope,
-) : KotlinPluginsExceptionReporter, Disposable {
+) : KotlinPluginsExceptionReporter, Disposable, KotlinPluginDiscoveryUpdater {
     private val logger by lazy { thisLogger() }
 
     private val statusPublisher by lazy { project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC) }
 
     private val discoveryHandler = DiscoveryHandler()
 
-    inner class State(
-        private val job: Job,
+    override suspend fun discoveredSync(
+        discovery: KotlinPluginDiscoveryUpdater.Discovery,
+        redrawAfterUpdate: Boolean,
     ) {
-        private var closed = false
-
-        private val connection: Lazy<SimpleMessageBusConnection> = lazy {
-            if (closed) {
-                error("State already closed")
-            }
-
-            val connection = project.messageBus.connect()
-            connection.subscribe(KotlinPluginDiscoveryUpdater.TOPIC, discoveryHandler)
-            connection
-        }
-
-        fun start() {
-            job.start()
-
-            runCatching { connection.value }
-        }
-
-        suspend fun join() {
-            job.join()
-        }
-
-        fun close() {
-            job.cancel()
-
-            closed = true
-
-            if (connection.isInitialized()) {
-                connection.value.disconnect()
-            }
-        }
+        discoveryHandler.discoveredSync(discovery, redrawAfterUpdate)
     }
 
-    private val state = AtomicReference<State?>(null)
+    private val state = AtomicReference<Job?>(null)
 
     private val stackTraceMap = ConcurrentHashMap<JarId, Set<String>>()
     private val metadata = ConcurrentHashMap<JarId, JarMetadata>()
@@ -171,7 +135,8 @@ internal class KotlinPluginsExceptionReporterImpl(
     }
 
     private data class JarMetadata(
-        val requestedVersion: String,
+        val requestedVersion: RequestedVersion,
+        val resolvedVersion: ResolvedVersion,
         val origin: KotlinArtifactsRepository,
         val checksum: String,
         val isLocal: Boolean,
@@ -181,7 +146,7 @@ internal class KotlinPluginsExceptionReporterImpl(
     )
 
     override fun dispose() {
-        state.getAndSet(null)?.close()
+        state.getAndSet(null)?.cancel()
         stackTraceMap.clear()
         caughtExceptions.clear()
         metadata.clear()
@@ -197,7 +162,7 @@ internal class KotlinPluginsExceptionReporterImpl(
     }
 
     override fun stop() {
-        state.getAndSet(null)?.close()
+        state.getAndSet(null)?.cancel()
         stackTraceMap.clear()
         caughtExceptions.clear()
         metadata.clear()
@@ -210,7 +175,7 @@ internal class KotlinPluginsExceptionReporterImpl(
         context = CoroutineName("KotlinPluginsExceptionReporterImpl.start"),
         start = CoroutineStart.LAZY,
     ) {
-        val jars = project.service<KotlinPluginsStorage>().requestJars()
+        val jars = project.service<KotlinPluginsStorage>().requestDiscovery()
 
         supervisorScope {
             jars.chunked(jars.size / 10 + 1).forEach { chunk ->
@@ -223,7 +188,7 @@ internal class KotlinPluginsExceptionReporterImpl(
         statusPublisher.redraw()
 
         logger.debug("Finished initial processing of all jars")
-    }.let(::State)
+    }
 
     private suspend fun processChunk(chunk: List<KotlinPluginDiscoveryUpdater.Discovery>) {
         chunk.forEach { discovery ->
@@ -242,7 +207,8 @@ internal class KotlinPluginsExceptionReporterImpl(
         return if (old == null || old.checksum != discovery.checksum) {
             ifNew()
             JarMetadata(
-                requestedVersion = discovery.version,
+                requestedVersion = discovery.requestedVersion,
+                resolvedVersion = discovery.resolvedVersion,
                 checksum = discovery.checksum,
                 origin = discovery.origin,
                 isLocal = discovery.isLocal,
@@ -252,7 +218,8 @@ internal class KotlinPluginsExceptionReporterImpl(
             )
         } else {
             JarMetadata(
-                requestedVersion = discovery.version,
+                requestedVersion = discovery.requestedVersion,
+                resolvedVersion = discovery.resolvedVersion,
                 checksum = discovery.checksum,
                 origin = discovery.origin,
                 isLocal = discovery.isLocal,
@@ -263,9 +230,11 @@ internal class KotlinPluginsExceptionReporterImpl(
         }
     }
 
-    private suspend fun processDiscovery(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawUpdateUpdate: Boolean) {
-        val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
-        stackTraceMap.remove(jarId)
+    private suspend fun processDiscovery(
+        discovery: KotlinPluginDiscoveryUpdater.Discovery,
+        redrawUpdateUpdate: Boolean,
+    ) {
+        stackTraceMap.remove(discovery.jarId)
 
         val plugin = project.service<KotlinPluginsSettings>().pluginByName(discovery.pluginName) ?: return
         if (plugin.ignoreExceptions) {
@@ -274,7 +243,7 @@ internal class KotlinPluginsExceptionReporterImpl(
 
         when (val result = KotlinPluginsJarAnalyzer.analyze(discovery.jar)) {
             is KotlinPluginsAnalyzedJar.Success -> {
-                stackTraceMap[jarId] = result.fqNames
+                stackTraceMap[discovery.jarId] = result.fqNames
 
                 if (redrawUpdateUpdate) {
                     statusPublisher.redraw()
@@ -365,7 +334,14 @@ internal class KotlinPluginsExceptionReporterImpl(
         }
 
         newExceptions.forEach { id ->
-            statusPublisher.updateVersion(id.pluginName, id.mavenId, id.version, ArtifactStatus.ExceptionInRuntime)
+            statusPublisher.updateVersion(
+                pluginName = id.pluginName,
+                mavenId = id.mavenId,
+                requestedVersion = id.requestedVersion,
+                status = ArtifactStatus.ExceptionInRuntime(
+                    jarId = id,
+                ),
+            )
         }
 
         if (autoDisable) {
@@ -374,7 +350,7 @@ internal class KotlinPluginsExceptionReporterImpl(
                     project = project,
                     disabledPlugin = plugin.name,
                     mavenId = ids.singleOrNull()?.mavenId,
-                    version = ids.singleOrNull()?.version,
+                    requestedVersion = ids.singleOrNull()?.requestedVersion,
                 )
             }
         } else {
@@ -384,24 +360,25 @@ internal class KotlinPluginsExceptionReporterImpl(
         }
     }
 
-    override fun hasExceptions(pluginName: String, mavenId: String, version: String): Boolean {
-        return caughtExceptions[pluginName].orEmpty().any { it.jarId.mavenId == mavenId && it.jarId.version == version }
+    override fun hasExceptions(pluginName: String, mavenId: String, requestedVersion: RequestedVersion): Boolean {
+        return caughtExceptions[pluginName].orEmpty()
+            .any { it.jarId.mavenId == mavenId && it.jarId.requestedVersion == requestedVersion }
     }
 
-    override fun getExceptionsReport(pluginName: String, mavenId: String, version: String): ExceptionsReport? {
-        val exceptions = caughtExceptions[pluginName].orEmpty()
-            .filter { it.jarId.mavenId == mavenId && it.jarId.version == version }
+    override fun getExceptionsReport(jarId: JarId): ExceptionsReport? {
+        val exceptions = caughtExceptions[jarId.pluginName].orEmpty()
+            .filter { it.jarId == jarId }
 
         return if (exceptions.isEmpty()) {
             null
         } else {
-            val metadata = metadata[JarId(pluginName, mavenId, version)] ?: return null
+            val metadata = metadata[jarId] ?: return null
 
             ExceptionsReport(
-                pluginName = pluginName,
-                mavenId = mavenId,
-                version = version,
+                pluginName = jarId.pluginName,
+                mavenId = jarId.mavenId,
                 requestedVersion = metadata.requestedVersion,
+                resolvedVersion = metadata.resolvedVersion,
                 origin = metadata.origin,
                 checksum = metadata.checksum,
 
@@ -415,16 +392,16 @@ internal class KotlinPluginsExceptionReporterImpl(
         }
     }
 
-    override suspend fun createReportFile(report: ExceptionsReport): Path? = runCatching {
+    override suspend fun createReportFile(report: ExceptionsReport): Path? = runCatchingExceptCancellation {
         val storage = project.service<KotlinPluginsStorage>()
-        val reportsDir = storage.reportsDir() ?: return@runCatching null
+        val reportsDir = storage.reportsDir() ?: return@runCatchingExceptCancellation null
 
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH-mm-ss")
             .withZone(ZoneId.systemDefault())
 
         val nowFormatted = formatter.format(Instant.now())
 
-        val reportFilename = "${report.pluginName}-${report.mavenId}-${report.version}-${nowFormatted}"
+        val reportFilename = "${report.pluginName}-${report.mavenId}-${nowFormatted}"
             .replace(":", "-")
             .replace(".", "-")
             .plus(".txt")
@@ -436,20 +413,22 @@ internal class KotlinPluginsExceptionReporterImpl(
                 reportFile.createFile()
             }
 
-            reportFile.writeText("""
+            reportFile.writeText(
+                """
 KEFS Report for ${report.pluginName} (${report.mavenId})
 
 Kotlin IDE version: ${service<KotlinVersionService>().getKotlinIdePluginVersion()}
 Kotlin version mismatch: ${report.kotlinVersionMismatch ?: "none"}
-Resolved version: ${report.version}
 Requested version: ${report.requestedVersion}
+Resolved version: ${report.resolvedVersion}
 Origin repository: ${report.origin.value}
 Checksum: ${report.checksum}
 Is probably incompatible: ${report.isProbablyIncompatible}
 
 Exceptions:
 ${report.exceptions.joinToString("$NL$NL") { it.stackTraceToString() }}
-            """.trimIndent())
+            """.trimIndent()
+            )
         }
 
         reportFile
@@ -469,22 +448,22 @@ ${report.exceptions.joinToString("$NL$NL") { it.stackTraceToString() }}
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {
-        override suspend fun discoveredSync(discovery: KotlinPluginDiscoveryUpdater.Discovery, redrawAfterUpdate: Boolean) {
-            val jarId = JarId(discovery.pluginName, discovery.mavenId, discovery.version)
-
+        override suspend fun discoveredSync(
+            discovery: KotlinPluginDiscoveryUpdater.Discovery,
+            redrawAfterUpdate: Boolean,
+        ) {
             var new = false
-            metadata.compute(jarId) { _, old ->
+            metadata.compute(discovery.jarId) { _, old ->
                 computeMetadata(old, discovery) {
                     new = true
                     caughtExceptions.compute(discovery.pluginName) { _, old ->
-                        old.orEmpty().filterNot { it.jarId == jarId }.toSet()
+                        old.orEmpty().filterNot { it.jarId == discovery.jarId }.toSet()
                     }
                 }
             }
 
             if (new) {
-                project.service<KotlinPluginsNotifications>()
-                    .deactivate(discovery.pluginName, discovery.mavenId, discovery.version)
+                project.service<KotlinPluginsNotifications>().deactivate(discovery.jarId)
 
                 refreshNotifications()
 
@@ -494,7 +473,7 @@ ${report.exceptions.joinToString("$NL$NL") { it.stackTraceToString() }}
     }
 
     fun clearAll() {
-        state.getAndSet(null)?.close()
+        state.getAndSet(null)?.cancel()
         stackTraceMap.clear()
         caughtExceptions.clear()
         metadata.clear()

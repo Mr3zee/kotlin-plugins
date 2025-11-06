@@ -63,22 +63,22 @@ class MyPluginTest : BasePlatformTestCase() {
 
         val exact = MatchFilter(
             matching = KotlinPluginDescriptor.VersionMatching.EXACT,
-            version = "0.2.3-dev-1",
+            requestedVersion = "0.2.3-dev-1".requested(),
         )
 
         val sameMajor = MatchFilter(
             matching = KotlinPluginDescriptor.VersionMatching.SAME_MAJOR,
-            version = "0.2.2",
+            requestedVersion = "0.2.2".requested(),
         )
 
         val latest = MatchFilter(
             matching = KotlinPluginDescriptor.VersionMatching.LATEST,
-            version = "0.2.3",
+            requestedVersion = "0.2.3".requested(),
         )
 
-        assertEquals("0.2.3-dev-1", getMatching(listOf(versions1, versions2), "1.9.24-", exact))
-        assertEquals("0.5.0-dev-1", getMatching(listOf(versions1, versions2), "1.9.24-", sameMajor))
-        assertEquals("1.5.0-dev-1", getMatching(listOf(versions1), "1.9.24-", latest))
+        assertEquals("0.2.3-dev-1", getMatching(listOf(versions1, versions2), "1.9.24-", exact)?.value)
+        assertEquals("0.2.3-dev-1", getMatching(listOf(versions1, versions2), "1.9.24-", sameMajor)?.value)
+        assertEquals("1.5.0-dev-1", getMatching(listOf(versions1), "1.9.24-", latest)?.value)
         assertEquals(null, getMatching(listOf(versions1, versions2), "1.9.24-", latest))
     }
 
@@ -145,7 +145,7 @@ class MyPluginTest : BasePlatformTestCase() {
                         )
                     ),
                 ),
-                version = "0.2.2-dev-1",
+                requestedVersion = "0.2.2-dev-1".requested(),
             ),
             kotlinIdeVersion = "1.9.24",
             dest = tempFile,
@@ -294,26 +294,26 @@ class MyPluginTest : BasePlatformTestCase() {
 
         val matched = KotlinPluginsExceptionAnalyzerService.match(
             mapOf(
-                JarId("1", "1", "1") to setOf(
+                JarId("1", "1", "1".requested(), "1".resolved()) to setOf(
                     "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
                     "com.github.mr3zee.kotlinPlugins.ExceptionClassB",
                 ),
-                JarId("1", "1", "2") to setOf(
-                    "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
-                    "com.github.mr3zee.kotlinPlugins.ExceptionClassB",
-                    "com.github.mr3zee.kotlinPlugins.ExceptionClassC",
-                ),
-                JarId("1", "1", "3") to setOf(
+                JarId("1", "1", "2".requested(), "2".resolved()) to setOf(
                     "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
                     "com.github.mr3zee.kotlinPlugins.ExceptionClassB",
                     "com.github.mr3zee.kotlinPlugins.ExceptionClassC",
                 ),
-                JarId("1", "1", "4") to setOf(
+                JarId("1", "1", "3".requested(), "3".resolved()) to setOf(
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassB",
+                    "com.github.mr3zee.kotlinPlugins.ExceptionClassC",
+                ),
+                JarId("1", "1", "4".requested(), "4".resolved()) to setOf(
                     "com.github.mr3zee.kotlinPlugins.ExceptionClassA",
                 ),
             ),
             exception,
-        ).orEmpty().map { it.version }
+        ).orEmpty().map { it.requestedVersion.value }
 
         assertSameElements(matched, listOf("2", "3"))
     }

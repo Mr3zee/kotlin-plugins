@@ -23,9 +23,9 @@ internal class KotlinPluginsNotifications {
         }
     }
 
-    fun deactivate(pluginName: String, mavenId: String, version: String) {
+    fun deactivate(jarId: JarId) {
         synchronized(this) {
-            activePlugins = activePlugins - JarId(pluginName, mavenId, version)
+            activePlugins = activePlugins - jarId
         }
     }
 

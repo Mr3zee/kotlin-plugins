@@ -44,9 +44,10 @@ internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
                     }
 
                 // coreVersion (0.1.0) -> version (0.1.0-dev-123)
-                val version = "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}"
+                val requestedVersion = "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}"
+                    .requested()
 
-                RequestedKotlinPluginDescriptor(descriptor, version, id)
+                RequestedKotlinPluginDescriptor(descriptor, requestedVersion, id)
             }
         }
     }
