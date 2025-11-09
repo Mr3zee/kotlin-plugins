@@ -67,6 +67,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
 import java.awt.GridBagConstraints
@@ -467,7 +468,6 @@ internal class OverviewPanel(
                         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
                         if (analyzer.state.enabled) {
                             addRootPanel(customiseComponent = {
-                                it.maximumSize.width = 600.scaled
                                 it.minimumSize.width = 270.scaled
                                 it.preferredSize.width = 600.scaled
                                 it.preferredSize.height = 270.scaled
@@ -927,7 +927,10 @@ internal class OverviewPanel(
                 }
             })
 
-            row { cell(exceptionsPanel) }
+            row {
+                cell(exceptionsPanel)
+                    .align(AlignX.FILL)
+            }
 
             loadFqNamesAsync(jarId) { names ->
                 project.service<KotlinPluginsTreeStateService>().treeScope
