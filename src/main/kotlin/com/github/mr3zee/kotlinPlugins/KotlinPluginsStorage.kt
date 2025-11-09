@@ -340,6 +340,8 @@ internal class KotlinPluginsStorage(
         } ?: return
 
         if (!key.isValid) {
+            // probably a parent was removed
+            clearState()
             return
         }
 
