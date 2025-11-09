@@ -2,10 +2,43 @@
 
 KEFS is a powerful tool for *developing* compiler plugins too.
 
+## 0. Why would need it?
+
+Core problem is explained [here](GUIDE.md#0-problem-statement), here is tldr for plugin developers:
+
+Compiler API is not stable. This means that your plugin compiled with 2.0.0 Kotlin probably will
+not work with Kotlin 2.2.20 due to binary incompatible changes.
+When running a regular build, for example, this will result in a build failure, 
+with a error which may be confusing for a user.
+
+Here is the fun part:
+IDE runs a Kotlin complier under the hood to provide syntax highlighting, auto-completions.
+It **can** also render symbols and diagnostics created by a compiler plugin.
+This makes the IDE DX much better - no red code, no error only on build, etc.
+If your plugin generated user-facing code or/and diagnostics - you want that to work properly.
+
+Now the catch and the reason there is this guide:
+
+\- What version of Kotlin complier does IDE run?
+\- It's [complicated](#21-kotlin-compiler-version-location)
+
+\- How do I know it is compatible?
+\- It's [complicated](#23-compile-against-specific-kotlin-compiler-version)
+
+\- Is it even possible and do I really need it?
+\- **That's easy!** Yes and yes! You want your users to have good DX,
+that's why you created a compiler plugin in the first place! 
+Red code and broken diagnostics in IDE is not good DX.
+KEFS and the guide below will help you make your users happy\*.
+
+\* It's still not easy to do and maintain. 
+We are thinking on how we can make process easier for plugin authors. 
+KEFS is the first step.
+
 ## 1. Plugin Development
 
 > Use the [Template](https://github.com/Kotlin/compiler-plugin-template) to get started.
-> It will be updated with the latest compiler plugin API and the latest enhancements for KEFS features.
+> It is updated with the latest compiler plugin API and the latest enhancements for KEFS features.
 
 There are certain criteria that must be met for a plugin to be observed by KEFS:
 
@@ -47,7 +80,8 @@ See also: details about [Version Matching](GUIDE.md#version-matching) strategies
 KEFS defines compatibility by the `<kotlin-version>` part in the artifact version.
 It must match the version of the Kotlin compiler inside a user's current IDE.
 
-Figuring out the exact version of the Kotlin compiler inside a user's IDE is not trivial.
+Figuring out the exact version of the Kotlin compiler inside a user's IDE 
+is [not trivial](#21-kotlin-compiler-version-location).
 And it must be done before publication.
 
 These Kotlin versions are published to this repository: https://packages.jetbrains.team/maven/p/ij/intellij-dependencies
