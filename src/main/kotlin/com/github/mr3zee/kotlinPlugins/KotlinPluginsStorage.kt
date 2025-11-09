@@ -11,7 +11,6 @@ import com.intellij.openapi.util.NlsContexts
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.provider.asNioPathOrNull
 import com.intellij.platform.eel.provider.getEelDescriptor
-import com.intellij.platform.eel.provider.upgradeBlocking
 import com.intellij.util.io.createDirectories
 import com.intellij.util.messages.Topic
 import kotlinx.coroutines.*
@@ -193,11 +192,6 @@ internal class KotlinPluginsStorage(
     @Suppress("UnstableApiUsage")
     suspend fun cacheDir(): Path? {
         return resolveCacheDir { project.getEelDescriptor().upgrade() }
-    }
-
-    @Suppress("UnstableApiUsage")
-    fun cacheDirBlocking(): Path? {
-        return resolveCacheDir { project.getEelDescriptor().upgradeBlocking() }
     }
 
     private val actualizerLock = Mutex()
@@ -519,7 +513,7 @@ internal class KotlinPluginsStorage(
         }.filterNotNull()
     }
 
-    fun getLocationFor(partial: PartialJarId): Path? {
+    suspend fun getLocationFor(partial: PartialJarId): Path? {
         if (partial.pluginName == null) {
             return null
         }
@@ -530,7 +524,7 @@ internal class KotlinPluginsStorage(
         }
 
         val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
-        return cacheDirBlocking()
+        return cacheDir()
             ?.resolve(kotlinIdeVersion)
             ?.resolve(partial.pluginName)
             ?.let { if (partial.requested != null) it.resolve(partial.requested.value) else it }
@@ -898,12 +892,14 @@ internal class KotlinPluginsStorage(
                 FileWatcherPluginKey(requested.descriptor.name, requested.requestedVersion, resolvedVersion)
 
             val new = withContext(Dispatchers.IO) {
+                val newPath = cacheDirectory(
+                    kotlinIdeVersion = kotlinIdeVersion,
+                    pluginName = requested.descriptor.name,
+                    requestedVersion = requested.requestedVersion,
+                )
+
                 pluginWatchKeys.compute(pluginWatchKey) { _, old ->
-                    old ?: cacheDirectoryBlocking(
-                        kotlinIdeVersion = kotlinIdeVersion,
-                        pluginName = requested.descriptor.name,
-                        requestedVersion = requested.requestedVersion,
-                    )?.registerSafe(
+                    old ?: newPath?.registerSafe(
                         StandardWatchEventKinds.ENTRY_MODIFY,
                         StandardWatchEventKinds.ENTRY_DELETE,
                     )
@@ -1088,11 +1084,11 @@ internal class KotlinPluginsStorage(
         )
     }
 
-    private fun findJarPath(
+    private suspend fun findJarPath(
         requested: RequestedKotlinPluginDescriptor,
         kotlinIdeVersion: String,
     ): Triple<ResolvedVersion, String, Path>? = runCatchingExceptCancellation {
-        val basePath = cacheDirectoryBlocking(
+        val basePath = cacheDirectory(
             kotlinIdeVersion = kotlinIdeVersion,
             pluginName = requested.descriptor.name,
             requestedVersion = requested.requestedVersion,
@@ -1192,20 +1188,6 @@ internal class KotlinPluginsStorage(
                 withContext(Dispatchers.IO) {
                     createDirectories()
                 }
-            }
-    }
-
-    private fun cacheDirectoryBlocking(
-        kotlinIdeVersion: String,
-        pluginName: String,
-        requestedVersion: RequestedVersion,
-    ): Path? {
-        return cacheDirBlocking()
-            ?.resolve(kotlinIdeVersion)
-            ?.resolve(pluginName)
-            ?.resolve(requestedVersion.value)
-            ?.apply {
-                createDirectories()
             }
     }
 }

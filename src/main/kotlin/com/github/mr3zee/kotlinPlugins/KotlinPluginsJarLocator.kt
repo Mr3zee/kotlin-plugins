@@ -240,7 +240,7 @@ internal object KotlinPluginsJarLocator {
                             |No compiler plugin artifact exists matching the requested version and criteria: 
                             |  - Version: ${versioned.requestedVersion}, prefixed with $kotlinIdeVersion
                             |  - Criteria: ${matchFilter.matching}
-                            |  - All artifacts in the bundle have the same version.
+                            |  - All artifacts in the bundle must have the same version.
                             |Available versions: 
                             |  - ${availableVersions.entries.joinToString("\n|  - ") { (k, v) -> "${k.id}: $v" }}
                             |Searched in $repository
