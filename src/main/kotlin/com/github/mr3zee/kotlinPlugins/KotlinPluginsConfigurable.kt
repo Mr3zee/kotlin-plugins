@@ -16,6 +16,7 @@ import com.intellij.openapi.ui.emptyText
 import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.ContextHelpLabel
+import com.intellij.ui.JBIntSpinner
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.JBCheckBox
@@ -29,6 +30,7 @@ import com.intellij.ui.dsl.builder.RightGap
 import com.intellij.ui.dsl.builder.Row
 import com.intellij.ui.dsl.builder.actionButton
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.layout.selected
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
@@ -52,24 +54,30 @@ private class LocalState {
     var showCacheClearConfirmationDialog: Boolean = true
     var exceptionAnalyzerEnabled: Boolean = false
     var autoDiablePlugins: Boolean = false
+    var autoUpdateEnabled: Boolean = true
+    var autoUpdateInterval: Int = 20
 
     fun isModified(
         analyzer: KotlinPluginsExceptionAnalyzerState,
         tree: KotlinPluginsTreeState,
         settings: KotlinPluginsSettings.State,
+        storage: KotlinPluginsStorageState,
     ): Boolean {
         return repositories != settings.repositories ||
                 plugins != settings.plugins ||
                 pluginsEnabled != settings.pluginsEnabled ||
                 exceptionAnalyzerEnabled != analyzer.enabled ||
                 showCacheClearConfirmationDialog != tree.showClearCachesDialog ||
-                autoDiablePlugins != analyzer.autoDisable
+                autoDiablePlugins != analyzer.autoDisable ||
+                autoUpdateEnabled != storage.autoUpdate ||
+                autoUpdateInterval != storage.updateInterval
     }
 
     fun reset(
         analyzer: KotlinPluginsExceptionAnalyzerState,
         tree: KotlinPluginsTreeState,
         settings: KotlinPluginsSettings.State,
+        storage: KotlinPluginsStorageState,
     ) {
         repositories.clear()
         repositories.addAll(settings.repositories)
@@ -83,12 +91,15 @@ private class LocalState {
         exceptionAnalyzerEnabled = analyzer.enabled
         showCacheClearConfirmationDialog = tree.showClearCachesDialog
         autoDiablePlugins = analyzer.autoDisable
+        autoUpdateEnabled = storage.autoUpdate
+        autoUpdateInterval = storage.updateInterval
     }
 
     fun applyTo(
         analyzer: KotlinPluginsExceptionAnalyzerService,
         tree: KotlinPluginsTreeState,
         settings: KotlinPluginsSettings,
+        storage: KotlinPluginsStorage,
     ) {
         val enabledPlugins = plugins.map {
             it.copy(enabled = pluginsEnabled[it.name] ?: it.enabled)
@@ -98,6 +109,7 @@ private class LocalState {
 
         analyzer.updateState(exceptionAnalyzerEnabled, autoDiablePlugins)
         tree.showClearCachesDialog = showCacheClearConfirmationDialog
+        storage.updateState(autoUpdateEnabled, autoUpdateInterval)
     }
 
     private val KotlinPluginsSettings.State.pluginsEnabled: Map<String, Boolean>
@@ -115,6 +127,9 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
     private lateinit var clearCachesCheckBox: JBCheckBox
     private lateinit var enableAnalyzerCheckBox: JBCheckBox
     private lateinit var autoDisablePluginsCheckBox: JBCheckBox
+
+    private lateinit var autoUpdateCheckBox: JBCheckBox
+    private lateinit var autoUpdateInterval: JBIntSpinner
 
     private var rootPanel: JPanel? = null
 
@@ -303,6 +318,33 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
 
             group(KotlinPluginsBundle.message("group.other")) {
                 row {
+                    autoUpdateCheckBox = checkBox(KotlinPluginsBundle.message("settings.enable.auto.updates"))
+                        .comment(KotlinPluginsBundle.message("settings.enable.auto.updates.comment"))
+                        .applyToComponent {
+                            isSelected = local.autoUpdateEnabled
+                            addItemListener { local.autoUpdateEnabled = isSelected }
+                        }
+                        .component
+                }
+
+                indent {
+                    row {
+                        val range = 1..120
+                        autoUpdateInterval = spinner(range)
+                            .label(KotlinPluginsBundle.message("settings.auto.update.interval"))
+                            .comment(KotlinPluginsBundle.message("settings.auto.update.interval.comment", range.first, range.last))
+                            .enabledIf(autoUpdateCheckBox.selected)
+                            .applyToComponent {
+                                number = local.autoUpdateInterval
+                                addChangeListener {
+                                    local.autoUpdateInterval = number
+                                }
+                            }
+                            .component
+                    }
+                }
+
+                row {
                     cell(clearCachesCheckBox)
                 }
             }
@@ -365,24 +407,27 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
         val settingState = project.service<KotlinPluginsSettings>().safeState()
         val analyzerState = project.service<KotlinPluginsExceptionAnalyzerService>().state
         val treeState = project.service<KotlinPluginsTreeStateService>().state
+        val storageState = project.service<KotlinPluginsStorage>().state
 
-        return local.isModified(analyzerState, treeState, settingState)
+        return local.isModified(analyzerState, treeState, settingState, storageState)
     }
 
     override fun apply() {
         val settings = project.service<KotlinPluginsSettings>()
         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>()
         val treeState = project.service<KotlinPluginsTreeStateService>().state
+        val storage = project.service<KotlinPluginsStorage>()
 
-        local.applyTo(analyzer, treeState, settings)
+        local.applyTo(analyzer, treeState, settings, storage)
     }
 
     override fun reset() {
         val settings = project.service<KotlinPluginsSettings>().safeState()
         val analyzer = project.service<KotlinPluginsExceptionAnalyzerService>().state
         val treeState = project.service<KotlinPluginsTreeStateService>().state
+        val storage = project.service<KotlinPluginsStorage>().state
 
-        local.reset(analyzer, treeState, settings)
+        local.reset(analyzer, treeState, settings, storage)
 
         repoModel.items = ArrayList(local.repositories)
         pluginsModel.items = ArrayList(local.plugins)

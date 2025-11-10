@@ -3,7 +3,12 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.SimplePersistentStateComponent
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
@@ -29,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
@@ -167,11 +173,37 @@ internal suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
     )
 }
 
+internal class KotlinPluginsStorageState : BaseState() {
+    var autoUpdate by property(true)
+    var updateInterval by property(20)
+}
+
 @Service(Service.Level.PROJECT)
+@State(
+    name = "com.github.mr3zee.kotlinPlugins.KotlinPluginsStorageState",
+    storages = [Storage(WORKSPACE_FILE)],
+)
 internal class KotlinPluginsStorage(
     private val project: Project,
     parentScope: CoroutineScope,
-) {
+): SimplePersistentStateComponent<KotlinPluginsStorageState>(KotlinPluginsStorageState()) {
+    fun updateState(autoUpdate: Boolean, updateInterval: Int) {
+        val oldAutoUpdate = state.autoUpdate
+        val oldUpdateInterval = state.updateInterval
+
+        state.autoUpdate = autoUpdate
+
+        if (updateInterval > 0) {
+            state.updateInterval = updateInterval
+        } else {
+            state.updateInterval = 20
+        }
+
+        if (oldAutoUpdate != autoUpdate || oldUpdateInterval != updateInterval) {
+            resetAutoupdates()
+        }
+    }
+
     private val resolvedCacheDir = AtomicBoolean(false)
     private var _cacheDir: Path? = null
     private val scope = parentScope + SupervisorJob(parentScope.coroutineContext.job)
@@ -285,12 +317,19 @@ internal class KotlinPluginsStorage(
         }
     }
 
-    init {
-        scope.launch(CoroutineName("actualizer-root")) {
+    private val autoUpdateJob = AtomicReference<Job?>(null)
+    private fun resetAutoupdates() {
+        autoUpdateJob.getAndSet(null)?.cancel()
+
+        if (!state.autoUpdate) {
+            return
+        }
+
+        val newJob = scope.launch(CoroutineName("actualizer-root"), start = CoroutineStart.LAZY) {
             supervisorScope {
                 launch(CoroutineName("actualizer-loop")) {
                     while (isActive) {
-                        delay(2.minutes)
+                        delay(state.updateInterval.minutes)
                         logger.debug("Scheduled actualize triggered")
 
                         runActualization()
@@ -298,6 +337,16 @@ internal class KotlinPluginsStorage(
                 }
             }
         }
+
+        if (!autoUpdateJob.compareAndSet(null, newJob)) {
+            newJob.cancel()
+        } else {
+            newJob.start()
+        }
+    }
+
+    init {
+        resetAutoupdates()
 
         val fileWatcherDispatcher = fileWatcherThread.asCoroutineDispatcher()
 

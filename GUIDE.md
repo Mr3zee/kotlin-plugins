@@ -58,6 +58,7 @@ handling.
 * **Automatically disable throwing plugins:** If the analyzer is enabled, this setting tells KEFS to
   automatically disable any plugin that throws an exception. You will be notified by a
   balloon pop-up.
+* **Enable background plugin updates:** This setting tells KEFS to automatically check for plugin updates with a specified period.
 * **Show confirmation dialog when clearing caches:** Toggles the confirmation pop-up for the "Clear Caches"
   action.
 
