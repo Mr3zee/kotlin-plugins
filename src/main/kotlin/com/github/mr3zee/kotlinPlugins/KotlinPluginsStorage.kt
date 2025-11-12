@@ -672,9 +672,9 @@ internal class KotlinPluginsStorage(
 
             logger.debug(
                 """
-                    Actualize bundle (${plugin.descriptor.name}, ${plugin.requestedVersion}):
-                    ${bundle.locatorResults.entries.joinToString("\n") { "- ${it.key.id}: ${it.value.logStatus()}" }}
-                """.trimIndent()
+                    |Actualize bundle (${plugin.descriptor.name}, ${plugin.requestedVersion}):
+                    ${bundle.locatorResults.entries.joinToString("\n") { "| - ${it.key.id}: ${it.value.logStatus()}" }}
+                """.trimMargin()
             )
 
             var resolvedVersion: ResolvedVersion? = null
