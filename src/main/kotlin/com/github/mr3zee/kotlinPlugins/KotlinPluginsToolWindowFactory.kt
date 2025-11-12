@@ -67,7 +67,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
-import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
 import java.awt.GridBagConstraints
@@ -530,7 +529,7 @@ internal class OverviewPanel(
                         }
                     }
 
-                    is ArtifactStatus.FailedToLoad -> {
+                    is ArtifactStatus.FailedToFetch -> {
                         val sanitizedMessage = project.service<KotlinPluginsStorage>()
                             .getFailedToFetchMessageFor(partial.pluginName, partial.mavenId, partial.requested)
                             ?: KotlinPluginsBundle.message("error.unknown.reason")
@@ -783,7 +782,7 @@ internal class OverviewPanel(
                 row {
                     cell(ActionLink(KotlinPluginsBundle.message("link.disableThisPlugin")) {
                         project.service<KotlinPluginsNotifications>().deactivate(jarId.pluginName)
-                        // Refresh editor notifications on EDT via project-bound scope
+                        // Refresh editor notifications on EDT via a project-bound scope
                         project.service<KotlinPluginsTreeStateService>().treeScope
                             .launch(Dispatchers.EDT) {
                                 EditorNotifications.getInstance(project).updateAllNotifications()
@@ -795,7 +794,7 @@ internal class OverviewPanel(
 
                     cell(ActionLink(KotlinPluginsBundle.message("editor.notification.autoDisable")) {
                         project.service<KotlinPluginsNotifications>().deactivate(jarId.pluginName)
-                        // Refresh editor notifications on EDT via project-bound scope
+                        // Refresh editor notifications on EDT via a project-bound scope
                         project.service<KotlinPluginsTreeStateService>().treeScope
                             .launch(Dispatchers.EDT) {
                                 EditorNotifications.getInstance(project).updateAllNotifications()
@@ -1148,7 +1147,7 @@ private class NodeData(
                     }
                 }
 
-                is ArtifactStatus.FailedToLoad -> {
+                is ArtifactStatus.FailedToFetch -> {
                     addText(label, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                     addText(" ${status.shortMessage}", SimpleTextAttributes.ERROR_ATTRIBUTES)
                 }
@@ -1606,7 +1605,7 @@ private fun statusToIcon(status: ArtifactStatus) = when (status) {
     is ArtifactStatus.Success -> AllIcons.RunConfigurations.TestPassed
     is ArtifactStatus.PartialSuccess -> AllIcons.RunConfigurations.TestPassedIgnored
     ArtifactStatus.InProgress -> AnimatedIcon.Default()
-    is ArtifactStatus.FailedToLoad -> AllIcons.RunConfigurations.TestFailed
+    is ArtifactStatus.FailedToFetch -> AllIcons.RunConfigurations.TestFailed
     is ArtifactStatus.ExceptionInRuntime -> AllIcons.RunConfigurations.TestError
     ArtifactStatus.Disabled -> AllIcons.RunConfigurations.TestSkipped
     ArtifactStatus.Skipped -> AllIcons.RunConfigurations.TestIgnored
@@ -1623,7 +1622,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
         is ArtifactStatus.Success -> KotlinPluginsBundle.message("tooltip.plugin.success")
         is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.plugin.partial")
         ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.plugin.inProgress")
-        is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.plugin.failed")
+        is ArtifactStatus.FailedToFetch -> KotlinPluginsBundle.message("tooltip.plugin.failed")
         is ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.plugin.exception")
         ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.plugin.disabled")
         ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.plugin.skipped")
@@ -1633,7 +1632,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
         is ArtifactStatus.Success -> KotlinPluginsBundle.message("tooltip.artifact.success")
         is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.artifact.partial")
         ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.artifact.inProgress")
-        is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.artifact.failed")
+        is ArtifactStatus.FailedToFetch -> KotlinPluginsBundle.message("tooltip.artifact.failed")
         is ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.artifact.exception")
         ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.artifact.disabled")
         ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.artifact.skipped")
@@ -1655,7 +1654,7 @@ private fun statusToTooltip(type: NodeType, status: ArtifactStatus) = when (type
 
         is ArtifactStatus.PartialSuccess -> KotlinPluginsBundle.message("tooltip.version.partial")
         ArtifactStatus.InProgress -> KotlinPluginsBundle.message("tooltip.version.inProgress")
-        is ArtifactStatus.FailedToLoad -> KotlinPluginsBundle.message("tooltip.version.failed", status.shortMessage)
+        is ArtifactStatus.FailedToFetch -> KotlinPluginsBundle.message("tooltip.version.failed", status.shortMessage)
         is ArtifactStatus.ExceptionInRuntime -> KotlinPluginsBundle.message("tooltip.version.exception")
         ArtifactStatus.Disabled -> KotlinPluginsBundle.message("tooltip.version.disabled")
         ArtifactStatus.Skipped -> KotlinPluginsBundle.message("tooltip.version.skipped")
@@ -1675,8 +1674,8 @@ private fun parentStatus(children: List<NodeData>): ArtifactStatus {
         return ArtifactStatus.InProgress
     }
 
-    if (children.any { it.status is ArtifactStatus.FailedToLoad }) {
-        return ArtifactStatus.FailedToLoad("")
+    if (children.any { it.status is ArtifactStatus.FailedToFetch }) {
+        return ArtifactStatus.FailedToFetch("")
     }
 
     if (children.any { it.status is ArtifactStatus.ExceptionInRuntime }) {

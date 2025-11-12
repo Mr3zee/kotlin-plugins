@@ -4,7 +4,11 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.observable.properties.AtomicBooleanProperty
+import com.intellij.openapi.observable.properties.ObservableProperty
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
@@ -17,6 +21,8 @@ import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.ContextHelpLabel
 import com.intellij.ui.JBIntSpinner
+import com.intellij.ui.TextFieldWithAutoCompletion
+import com.intellij.ui.TextFieldWithAutoCompletionListProvider
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.JBCheckBox
@@ -26,6 +32,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.Panel
 import com.intellij.ui.dsl.builder.RightGap
 import com.intellij.ui.dsl.builder.Row
 import com.intellij.ui.dsl.builder.actionButton
@@ -332,7 +339,13 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
                         val range = 1..120
                         autoUpdateInterval = spinner(range)
                             .label(KotlinPluginsBundle.message("settings.auto.update.interval"))
-                            .comment(KotlinPluginsBundle.message("settings.auto.update.interval.comment", range.first, range.last))
+                            .comment(
+                                KotlinPluginsBundle.message(
+                                    "settings.auto.update.interval.comment",
+                                    range.first,
+                                    range.last
+                                )
+                            )
                             .enabledIf(autoUpdateCheckBox.selected)
                             .applyToComponent {
                                 number = local.autoUpdateInterval
@@ -488,6 +501,7 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
     // region Plugins actions
     private fun onAddPlugin() {
         val dialog = PluginsDialog(
+            project = project,
             currentNames = local.plugins.map { it.name },
             availableRepositories = local.repositories,
             initial = null,
@@ -507,6 +521,7 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
         val selected = pluginsTable.selectedObject(pluginsModel) ?: return
         val idx = pluginsTable.selectedRow
         val dialog = PluginsDialog(
+            project = project,
             currentNames = local.plugins.map { it.name },
             availableRepositories = local.repositories,
             initial = selected,
@@ -776,6 +791,7 @@ private class RepositoryDialog(
 }
 
 private class PluginsDialog(
+    private val project: Project,
     private val currentNames: List<String>,
     private val availableRepositories: List<KotlinArtifactsRepository>,
     private val initial: KotlinPluginDescriptor?,
@@ -802,7 +818,7 @@ private class PluginsDialog(
 
         model = idsModel
 
-        minimumSize = Dimension(600.scaled, minimumSize.height)
+        minimumSize = Dimension(800.scaled, minimumSize.height)
         toolTipText = if (isDefault) {
             KotlinPluginsBundle.message("tooltip.defaultPluginCoordinatesNotEditable")
         } else {
@@ -845,6 +861,22 @@ private class PluginsDialog(
     }
 
     private lateinit var nameField: JBTextField
+    private lateinit var useReplacementCheckbox: JBCheckBox
+    private lateinit var replacementVersionField: TextFieldWithAutoCompletion<String>
+    private lateinit var replacementDetectField: TextFieldWithAutoCompletion<String>
+    private lateinit var replacementSearchField: TextFieldWithAutoCompletion<String>
+
+    private val versionReplacementIsValid by lazy {
+        AtomicBooleanProperty(showVersionReplacementExample())
+    }
+
+    private val detectReplacementIsValid by lazy {
+        AtomicBooleanProperty(showDetectReplacementExample())
+    }
+
+    private val searchReplacementIsValid by lazy {
+        AtomicBooleanProperty(showSearchReplacementExample())
+    }
 
     // DSL state
     private var enableInProject: Boolean = enabledInitial
@@ -868,6 +900,7 @@ private class PluginsDialog(
         }
 
         init()
+        initValidation()
     }
 
     override fun createCenterPanel(): JComponent {
@@ -967,6 +1000,107 @@ private class PluginsDialog(
                     }
                     .comment(KotlinPluginsBundle.message("checkbox.ignorePluginExceptions.comment"))
             }
+
+            collapsibleGroup(KotlinPluginsBundle.message("label.advanced")) {
+                row {
+                    useReplacementCheckbox = checkBox(KotlinPluginsBundle.message("label.useReplacement"))
+                        .applyToComponent {
+                            isSelected = initial?.replacement != null
+                            isEnabled = !isDefault
+
+                            if (isDefault) {
+                                toolTipText = KotlinPluginsBundle.message("tooltip.replacementNotEditable")
+                            }
+
+                            addChangeListener {
+                                versionReplacementIsValid.set(showVersionReplacementExample())
+                                detectReplacementIsValid.set(showDetectReplacementExample())
+                                searchReplacementIsValid.set(showSearchReplacementExample())
+                            }
+                        }
+                        .comment(KotlinPluginsBundle.message("checkbox.useReplacement.comment"))
+                        .component
+                }
+
+                indent {
+                    row(KotlinPluginsBundle.message("label.replacement.version")) {
+                        replacementVersionField =
+                            textFieldWithReplacementCompletion<KotlinPluginDescriptor.Replacement.VersionMacro>(
+                                project = project,
+                                initialValue = initial?.replacement?.version.orEmpty(),
+                            ).apply {
+                                setPlaceholder(placeholderReplacement.version)
+
+                                onChange {
+                                    versionReplacementIsValid.set(showVersionReplacementExample())
+                                    detectReplacementIsValid.set(showDetectReplacementExample())
+                                    searchReplacementIsValid.set(showSearchReplacementExample())
+                                }
+                            }
+
+                        cell(replacementVersionField)
+                            .align(AlignX.FILL)
+                    }
+
+                    exampleComment(versionReplacementIsValid, false) {
+                        val example = versionReplacementExample(it)
+                        KotlinPluginsBundle.message(
+                            "settings.add.plugin.replacement.example.render.version",
+                            example.version1,
+                            example.version2,
+                            example.version3,
+                        )
+                    }
+
+                    row(KotlinPluginsBundle.message("label.replacement.detect")) {
+                        replacementDetectField =
+                            textFieldWithReplacementCompletion<KotlinPluginDescriptor.Replacement.JarMacro>(
+                                project = project,
+                                initialValue = initial?.replacement?.detect.orEmpty(),
+                            ).apply {
+                                setPlaceholder(placeholderReplacement.detect)
+
+                                onChange {
+                                    detectReplacementIsValid.set(showDetectReplacementExample())
+                                }
+                            }
+
+                        cell(replacementDetectField)
+                            .align(AlignX.FILL)
+                    }
+
+                    exampleComment(detectReplacementIsValid, true) { replacement ->
+                        KotlinPluginsBundle.message(
+                            "settings.add.plugin.replacement.example.render.detect",
+                            detectReplacementExample(mutableIds.firstOrNull { mavenRegex.matches(it) }, replacement)
+                        )
+                    }
+
+                    row(KotlinPluginsBundle.message("label.replacement.search")) {
+                        replacementSearchField =
+                            textFieldWithReplacementCompletion<KotlinPluginDescriptor.Replacement.JarMacro>(
+                                project = project,
+                                initialValue = initial?.replacement?.search.orEmpty(),
+                            ).apply {
+                                setPlaceholder(placeholderReplacement.search)
+
+                                onChange {
+                                    searchReplacementIsValid.set(showSearchReplacementExample())
+                                }
+                            }
+
+                        cell(replacementSearchField)
+                            .align(AlignX.FILL)
+                    }
+
+                    exampleComment(searchReplacementIsValid, true) { replacement ->
+                        KotlinPluginsBundle.message(
+                            "settings.add.plugin.replacement.example.render.search",
+                            searchReplacementExample(mutableIds.firstOrNull { mavenRegex.matches(it) }, replacement)
+                        )
+                    }
+                }.visibleIf(useReplacementCheckbox.selected)
+            }
         }
 
         panel.preferredSize = Dimension(650.scaled, 0.scaled)
@@ -1006,7 +1140,129 @@ private class PluginsDialog(
             return ValidationInfo(KotlinPluginsBundle.message("validation.select.repository"))
         }
 
+        if (useReplacementCheckbox.isSelected) {
+            if (replacementVersionField.text.isNotEmpty()) {
+                validateReplacementPatternVersion(
+                    replacementVersionField.text,
+                    replacementVersionField,
+                )?.let { return it }
+            }
+
+            if (replacementDetectField.text.isNotEmpty()) {
+                validateReplacementPatternJar(
+                    replacementDetectField.text,
+                    replacementDetectField,
+                )?.let { return it }
+            }
+
+            if (replacementSearchField.text.isNotEmpty()) {
+                validateReplacementPatternJar(
+                    replacementSearchField.text,
+                    replacementSearchField,
+                )?.let { return it }
+            }
+        }
+
         return null
+    }
+
+    private fun Panel.exampleComment(
+        observable: ObservableProperty<Boolean>,
+        needsMavenId: Boolean,
+        updater: (KotlinPluginDescriptor.Replacement) -> String,
+    ) {
+        row {
+            comment("")
+                .applyToComponent {
+                    fun updateComment() {
+                        if (observable.get()) {
+                            text = if (needsMavenId && (mutableIds.isEmpty() || mutableIds.none { mavenRegex.matches(it) })) {
+                                KotlinPluginsBundle.message("settings.add.plugin.replacement.example.render.empty")
+                            } else {
+                                updater(currentReplacement())
+                            }
+                        }
+                    }
+
+                    idsModel.addTableModelListener { updateComment() }
+                    observable.afterChange { updateComment() }
+                    updateComment()
+                }
+        }.visibleIf(observable)
+    }
+
+    private fun currentReplacement(): KotlinPluginDescriptor.Replacement {
+        return KotlinPluginDescriptor.Replacement(
+            version = replacementVersionField.text.takeIf { it.isNotEmpty() } ?: placeholderReplacement.version,
+            detect = replacementDetectField.text.takeIf { it.isNotEmpty() } ?: placeholderReplacement.detect,
+            search = replacementSearchField.text.takeIf { it.isNotEmpty() } ?: placeholderReplacement.search,
+        )
+    }
+
+    private fun showVersionReplacementExample(): Boolean {
+        return useReplacementCheckbox.isSelected && (replacementVersionField.text.isEmpty() ||
+                validateReplacementPatternVersion(replacementVersionField.text, replacementVersionField) == null)
+    }
+
+    private fun showDetectReplacementExample(): Boolean {
+        return useReplacementCheckbox.isSelected && (replacementVersionField.text.isEmpty() ||
+                validateReplacementPatternVersion(replacementVersionField.text, replacementVersionField) == null) &&
+                (replacementDetectField.text.isEmpty() ||
+                        validateReplacementPatternJar(replacementDetectField.text, replacementDetectField) == null)
+    }
+
+    private fun showSearchReplacementExample(): Boolean {
+        return useReplacementCheckbox.isSelected && (replacementVersionField.text.isEmpty() ||
+                validateReplacementPatternVersion(replacementVersionField.text, replacementVersionField) == null) &&
+                (replacementSearchField.text.isEmpty() ||
+                        validateReplacementPatternJar(replacementSearchField.text, replacementSearchField) == null)
+    }
+
+    private class VersionReplacementExamples(
+        val version1: String,
+        val version2: String,
+        val version3: String,
+    )
+
+    private fun versionReplacementExample(
+        replacement: KotlinPluginDescriptor.Replacement?,
+    ): VersionReplacementExamples {
+        if (replacement == null) {
+            return VersionReplacementExamples("", "", "")
+        }
+
+        return VersionReplacementExamples(
+            version1 = replacement.getVersionString("2.2.0", "1.0.0"),
+            version2 = replacement.getVersionString("2.3.0-Beta2", "1.0.0"),
+            version3 = replacement.getVersionString("2.3.0-Beta2", "1.0.0-rc-dev.1234"),
+        )
+    }
+
+    private fun detectReplacementExample(
+        idString: String?,
+        replacement: KotlinPluginDescriptor.Replacement?,
+    ): String {
+        if (replacement == null || idString == null) {
+            return ""
+        }
+
+        val version = replacement.getVersionString("2.2.0", "1.0.0")
+        return "${replacement.getDetectString(MavenId(idString), version)}.jar"
+    }
+
+    private fun searchReplacementExample(
+        idString: String?,
+        replacement: KotlinPluginDescriptor.Replacement?,
+    ): String {
+        if (replacement == null || idString == null) {
+            return ""
+        }
+
+        val version = replacement.getVersionString("2.2.0", "1.0.0")
+
+        val id = MavenId(idString)
+        val artifactString = replacement.getArtifactString(id)
+        return "${id.getPluginGroupPath()}/$artifactString/$version/$artifactString-$version.jar"
     }
 
     companion object {
@@ -1034,9 +1290,22 @@ private class PluginsDialog(
             enabled = enableInProject,
             ignoreExceptions = ignoreExceptions,
             repositories = selectedRepos,
+            replacement = if (useReplacementCheckbox.isSelected) {
+                currentReplacement()
+            } else {
+                null
+            },
         )
     }
 }
+
+private val placeholderReplacement = KotlinPluginDescriptor.Replacement(
+    version = KotlinPluginDescriptor.Replacement.VersionMacro.KOTLIN_VERSION.macro +
+            "-" +
+            KotlinPluginDescriptor.Replacement.VersionMacro.LIB_VERSION.macro,
+    detect = KotlinPluginDescriptor.Replacement.JarMacro.ARTIFACT_ID.macro,
+    search = KotlinPluginDescriptor.Replacement.JarMacro.ARTIFACT_ID.macro,
+)
 
 internal val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()
 internal val pluginNameRegex = "[a-zA-Z0-9_-]+".toRegex()
@@ -1054,4 +1323,179 @@ internal object KotlinPluginsConfigurableUtil {
         selectArtifactsInitially = false
         ShowSettingsUtil.getInstance().showSettingsDialog(project, KotlinPluginsConfigurable::class.java)
     }
+}
+
+internal fun validateReplacementPatternVersion(
+    pattern: String,
+    component: JComponent? = null,
+): ValidationInfo? {
+    return validateReplacementPattern(
+        pattern = pattern,
+        isVersion = true,
+        mustContain = listOf(
+            KotlinPluginDescriptor.Replacement.VersionMacro.KOTLIN_VERSION,
+            KotlinPluginDescriptor.Replacement.VersionMacro.LIB_VERSION,
+        ),
+        allAvailable = KotlinPluginDescriptor.Replacement.VersionMacro.entries,
+        component = component,
+    )
+}
+
+internal fun validateReplacementPatternJar(
+    pattern: String,
+    component: JComponent? = null,
+): ValidationInfo? {
+    return validateReplacementPattern(
+        pattern = pattern,
+        isVersion = false,
+        mustContain = listOf(KotlinPluginDescriptor.Replacement.JarMacro.ARTIFACT_ID),
+        allAvailable = KotlinPluginDescriptor.Replacement.JarMacro.entries,
+        component = component,
+    )
+}
+
+internal fun validateReplacementPattern(
+    pattern: String,
+    isVersion: Boolean,
+    mustContain: List<KotlinPluginDescriptor.Replacement.Marco>,
+    allAvailable: List<KotlinPluginDescriptor.Replacement.Marco>,
+    component: JComponent? = null,
+): ValidationInfo? {
+    if (pattern.isBlank()) {
+        return ValidationInfo(KotlinPluginsBundle.message("validation.replacement.empty"), component)
+    }
+
+    if (mustContain.any { !pattern.contains(it.macro) }) {
+        return ValidationInfo(
+            KotlinPluginsBundle.message(
+                "validation.replacement.must.contain.macros",
+                mustContain.joinToString(", ") { it.macro }.sanitizeAngleBracketsForHtml(),
+            ),
+            component,
+        )
+    }
+
+    if (!isVersion && pattern.contains(".jar")) {
+        return ValidationInfo(KotlinPluginsBundle.message("validation.replacement.jar.extension"), component)
+    }
+
+    var i = 0
+    var invalidMacro = false
+    val allAvailableMacros = allAvailable.map { it.macro }
+    while (i < pattern.length) {
+        val c = pattern[i]
+
+        if (c != '<' && c != '>') {
+            i++
+            continue
+        }
+
+        val macro = when (c) {
+            '<' -> {
+                val start = i
+                var next = c
+
+                while (next != '>') {
+                    if (++i >= pattern.length) {
+                        invalidMacro = true
+                        break
+                    }
+
+                    next = pattern[i]
+                }
+
+                pattern.substring(start, (++i).coerceAtMost(pattern.length))
+            }
+
+            '>' -> {
+                invalidMacro = true
+                break
+            }
+
+            else -> continue
+        }
+
+        if (macro !in allAvailableMacros) {
+            invalidMacro = true
+            break
+        }
+    }
+
+    if (invalidMacro) {
+        return ValidationInfo(
+            KotlinPluginsBundle.message(
+                "validation.replacement.invalid.angle.brackets",
+                "&lt;",
+                "&gt;",
+                allAvailable.joinToString(", ").sanitizeAngleBracketsForHtml(),
+            ),
+            component,
+        )
+    }
+
+    var noMacros = pattern
+    allAvailable.forEach {
+        noMacros = noMacros.replace(it.macro, "")
+    }
+
+    if (isVersion) {
+        if (noMacros.contains(replacementPatternVersionForbiddenCharactersRegex)) {
+            return ValidationInfo(
+                KotlinPluginsBundle.message("validation.replacement.invalid.symbols.version"),
+                component,
+            )
+        }
+    } else {
+        if (noMacros.contains(replacementPatternForbiddenCharactersRegex)) {
+            return ValidationInfo(
+                KotlinPluginsBundle.message("validation.replacement.invalid.symbols"),
+                component,
+            )
+        }
+    }
+
+    return null
+}
+
+private inline fun <reified M> textFieldWithReplacementCompletion(
+    project: Project,
+    initialValue: String,
+): TextFieldWithAutoCompletion<String> where M : Enum<M>, M : KotlinPluginDescriptor.Replacement.Marco {
+    return textFieldWithReplacementCompletion(project, initialValue, enumValues<M>())
+}
+
+private fun textFieldWithReplacementCompletion(
+    project: Project,
+    initialValue: String,
+    macros: Array<out KotlinPluginDescriptor.Replacement.Marco>,
+) = TextFieldWithAutoCompletion(
+    /* project = */ project,
+    /* provider = */
+    object : TextFieldWithAutoCompletionListProvider<String>(macros.map { it.macro }) {
+        override fun getLookupString(item: String): String {
+            return item
+        }
+
+        override fun getPrefix(text: String, offset: Int): String {
+            val i = text.lastIndexOf('<', offset - 1)
+            return text.substring(i, offset)
+        }
+    },
+    /* showCompletionHint = */ false,
+    /* text = */ initialValue,
+)
+
+private fun TextFieldWithAutoCompletion<*>.onChange(action: () -> Unit) {
+    addDocumentListener(object : DocumentListener {
+        override fun documentChanged(event: DocumentEvent) {
+            action()
+        }
+    })
+}
+
+private val replacementPatternForbiddenCharactersRegex = "[^\\w-]".toRegex()
+private val replacementPatternVersionForbiddenCharactersRegex = "[^\\w.+-]".toRegex()
+
+private fun String.sanitizeAngleBracketsForHtml(): String {
+    return replace("<", "&lt;").replace(">", "&gt;")
 }

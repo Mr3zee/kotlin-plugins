@@ -69,6 +69,15 @@ internal sealed interface LocatorResult {
     ) : LocatorResult
 }
 
+internal fun LocatorResult.logStatus(): String {
+    return when (this) {
+        is LocatorResult.Cached -> "Cached: $resolvedVersion, ${state.requestedVersion}, ${filter.matching}, ${origin.name}"
+        is LocatorResult.FailedToFetch -> "FailedToFetch"
+        is LocatorResult.NotFound -> "NotFound"
+        is LocatorResult.FoundButBundleIsIncomplete -> "FoundButBundleIsIncomplete"
+    }
+}
+
 internal class Jar(
     val path: Path,
     val checksum: String,
@@ -93,7 +102,7 @@ internal object KotlinPluginsJarLocator {
 
     internal class ArtifactManifest(
         val plugin: KotlinPluginDescriptor,
-        val artifactId: String,
+        val mavenId: MavenId,
         val locator: Locator,
         val matchFilter: MatchFilter,
         val dest: Path,
@@ -127,7 +136,7 @@ internal object KotlinPluginsJarLocator {
         dest: Path,
         known: Map<String, Jar>,
     ): BundleResult {
-        val logTag = "[${versioned.descriptor.name}:${logId.andIncrement}]"
+        val logTag = "[${versioned.descriptor.name}:${versioned.requestedVersion}:${logId.andIncrement}]"
 
         logger.debug("$logTag Locating artifact for $kotlinIdeVersion")
 
@@ -168,15 +177,20 @@ internal object KotlinPluginsJarLocator {
                 when (repository.type) {
                     KotlinArtifactsRepository.Type.URL -> {
                         val groupUrl = artifact.groupId.replace(".", "/")
-                        val artifactUrl = "${repository.value}/$groupUrl/${artifact.artifactId}"
+                        val replacement = versioned.descriptor.replacement
+                        val artifactId = replacement?.getArtifactString(artifact) ?: artifact.artifactId
+                        val artifactUrl = "${repository.value}/$groupUrl/$artifactId"
 
                         ArtifactManifest.Locator.ByUrl(repository, artifactUrl)
                     }
 
                     KotlinArtifactsRepository.Type.PATH -> {
+                        val replacement = versioned.descriptor.replacement
+                        val artifactId = replacement?.getArtifactString(artifact) ?: artifact.artifactId
+
                         val artifactPath = Path(repository.value)
                             .resolve(artifact.getPluginGroupPath())
-                            .resolve(artifact.artifactId)
+                            .resolve(artifactId)
 
                         ArtifactManifest.Locator.ByPath(repository, artifactPath)
                     }
@@ -264,7 +278,7 @@ internal object KotlinPluginsJarLocator {
                 for (classifier in setOf("", "for-ide")) {
                     val manifest = ArtifactManifest(
                         plugin = versioned.descriptor,
-                        artifactId = artifact.artifactId,
+                        mavenId = artifact,
                         locator = locator,
                         matchFilter = versioned.asMatchFilter(),
                         dest = dest,
@@ -411,14 +425,32 @@ internal object KotlinPluginsJarLocator {
         resolvedVersion: ResolvedVersion,
         known: Jar?,
     ): LocatorResult {
-        val artifactVersion = "${manifest.kotlinIdeVersion}-$resolvedVersion"
+        val artifactVersion: String
+        val filename: String
+        val plainFilename: String
+        val metadataFilename: String
+        val classifiedFilename: String
 
-        logger.debug("$logTag Version to locate: $artifactVersion")
+        val replacement = manifest.plugin.replacement
 
-        val filename = "${manifest.artifactId}-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
-        val plainFilename = "${manifest.artifactId}-$artifactVersion.jar"
-        val metadataFilename = "${manifest.artifactId}-$artifactVersion.jar.$METADATA_EXTENSION"
-        val classifiedFilename = "${manifest.artifactId}-$artifactVersion${manifest.jarClassifier}.jar"
+        if (replacement != null) {
+            artifactVersion = replacement.getVersionString(manifest.kotlinIdeVersion, resolvedVersion.value)
+            val blueprint = replacement.getArtifactString(manifest.mavenId)
+
+            filename = "$blueprint-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
+            plainFilename = "$blueprint-$artifactVersion.jar"
+            metadataFilename = "$blueprint-$artifactVersion.jar.$METADATA_EXTENSION"
+            classifiedFilename = "$blueprint-$artifactVersion${manifest.jarClassifier}.jar"
+        } else {
+            artifactVersion = "${manifest.kotlinIdeVersion}-$resolvedVersion"
+
+            filename = "${manifest.mavenId.artifactId}-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
+            plainFilename = "${manifest.mavenId.artifactId}-$artifactVersion.jar"
+            metadataFilename = "${manifest.mavenId.artifactId}-$artifactVersion.jar.$METADATA_EXTENSION"
+            classifiedFilename = "${manifest.mavenId.artifactId}-$artifactVersion${manifest.jarClassifier}.jar"
+        }
+
+        logger.debug("Resolved artifact version: $artifactVersion, jar: $plainFilename")
 
         val checksumResult = getChecksum(
             logTag = logTag,

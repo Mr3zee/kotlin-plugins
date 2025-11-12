@@ -59,7 +59,7 @@ internal sealed interface ArtifactStatus {
     object PartialSuccess : ArtifactStatus
 
     object InProgress : ArtifactStatus
-    data class FailedToLoad(
+    data class FailedToFetch(
         @NlsContexts.Label val shortMessage: String,
     ) : ArtifactStatus
 
@@ -95,11 +95,11 @@ private fun ArtifactState.toStatus(): ArtifactStatus {
     return when (this) {
         is ArtifactState.Cached -> ArtifactStatus.Success(requestedVersion, resolvedVersion, criteria)
         is ArtifactState.FoundButBundleIsIncomplete -> ArtifactStatus.PartialSuccess
-        is ArtifactState.FailedToFetch -> ArtifactStatus.FailedToLoad(
+        is ArtifactState.FailedToFetch -> ArtifactStatus.FailedToFetch(
             KotlinPluginsBundle.message("status.failedToFetch")
         )
 
-        is ArtifactState.NotFound -> ArtifactStatus.FailedToLoad(
+        is ArtifactState.NotFound -> ArtifactStatus.FailedToFetch(
             KotlinPluginsBundle.message("status.notFound")
         )
     }
@@ -186,7 +186,7 @@ internal class KotlinPluginsStorageState : BaseState() {
 internal class KotlinPluginsStorage(
     private val project: Project,
     parentScope: CoroutineScope,
-): SimplePersistentStateComponent<KotlinPluginsStorageState>(KotlinPluginsStorageState()) {
+) : SimplePersistentStateComponent<KotlinPluginsStorageState>(KotlinPluginsStorageState()) {
     fun updateState(autoUpdate: Boolean, updateInterval: Int) {
         val oldAutoUpdate = state.autoUpdate
         val oldUpdateInterval = state.updateInterval
@@ -608,14 +608,14 @@ internal class KotlinPluginsStorage(
         attempt: Int = 1,
     ) {
         if (attempt > 3) {
-            logger.debug("Actualize plugins job failed after ${attempt - 1} attempts (${plugin.descriptor.name})")
+            logger.debug("Actualize plugins job failed after ${attempt - 1} attempts (${plugin.descriptor.name}, ${plugin.requestedVersion})")
             return
         }
 
         val descriptor = plugin.descriptor
         val currentJob = actualizerJobs[plugin]
         if (currentJob != null && currentJob.isActive) {
-            logger.debug("Actualize plugins job is already running (${plugin.descriptor.name})")
+            logger.debug("Actualize plugins job is already running (${plugin.descriptor.name}, ${plugin.requestedVersion})")
             return
         }
 
@@ -639,12 +639,16 @@ internal class KotlinPluginsStorage(
                 kotlinIdeVersion = kotlinIdeVersion,
                 pluginName = descriptor.name,
                 requestedVersion = plugin.requestedVersion,
-            ) ?: return@launch
+            ) ?: run {
+                statusPublisher.updatePlugin(descriptor.name, ArtifactStatus.FailedToFetch("Internal error"))
+                logger.error("Failed to find cache directory for ${descriptor.name} ${plugin.requestedVersion}")
+                return@launch
+            }
 
             val artifactsMap = pluginsCache
                 .getOrPut(descriptor.name) { ConcurrentHashMap() }
 
-            logger.debug("Actualize plugins job started (${plugin.descriptor.name}), attempt: $attempt")
+            logger.debug("Actualize plugins job started (${plugin.descriptor.name}, ${plugin.requestedVersion}), attempt: $attempt")
 
             val known = artifactsMap.entries
                 .filter { (key, value) ->
@@ -665,7 +669,7 @@ internal class KotlinPluginsStorage(
             if (bundleResult.isFailure) {
                 statusPublisher.updatePlugin(
                     pluginName = descriptor.name,
-                    status = ArtifactStatus.FailedToLoad("Unexpected error"),
+                    status = ArtifactStatus.FailedToFetch("Unexpected error"),
                 )
                 logger.error("Actualize plugins job failed (${plugin.descriptor.name})", bundleResult.exceptionOrNull())
                 failedToLocate = true
@@ -675,8 +679,10 @@ internal class KotlinPluginsStorage(
             val bundle = bundleResult.getOrThrow()
 
             logger.debug(
-                "Actualize bundle ${plugin.descriptor.name}: " +
-                        "${bundle.locatorResults.count { it.value !is LocatorResult.Cached }} not found"
+                """
+                    Actualize bundle (${plugin.descriptor.name}, ${plugin.requestedVersion}):
+                    ${bundle.locatorResults.entries.joinToString("\n") { "- ${it.key.id}: ${it.value.logStatus()}" }}
+                """.trimIndent()
             )
 
             failedToLocate = !bundle.allFound()
@@ -841,7 +847,7 @@ internal class KotlinPluginsStorage(
 
         // return not null only when all requested plugins are present and have the same version
         if (!allExist || differentVersions != 1) {
-            logger.debug("Requested plugins not found in full, indexing (${requested.descriptor.name}, ${requested.artifact.id})")
+            logger.debug("Requested plugins not found in full (${requested.descriptor.name}, ${requested.requestedVersion})")
             // no requested version is present for all requested plugins, or versions are not equal
             updateCacheFromDisk(requested, pluginMap, kotlinIdeVersion, paths.associate { it })
             return null
@@ -883,10 +889,10 @@ internal class KotlinPluginsStorage(
         requested: RequestedKotlinPluginDescriptor,
         pluginMap: ConcurrentHashMap<RequestedPluginKey, ArtifactState>,
         kotlinIdeVersion: String,
-        knownByIde: Map<String, ArtifactState.Cached?>,
+        knownInState: Map<String, ArtifactState.Cached?>,
     ) {
         if (indexJobs[requested]?.isActive == true) {
-            logger.debug("Update cache from disk job is already running (${requested.descriptor.name})")
+            logger.debug("Update cache from disk job is already running for ${requested.descriptor.name} (${requested.requestedVersion})")
             return
         }
 
@@ -912,9 +918,9 @@ internal class KotlinPluginsStorage(
                 )
             }
 
-            logger.trace(
-                "On disk versions for ${requested.requestedVersion} (${requested.descriptor.name}): " +
-                        "${paths.map { "${it.mavenId} -> ${it.jar?.path}" }}"
+            logger.debug(
+                "On disk versions for ${requested.descriptor.name}:${requested.requestedVersion}: " +
+                        "${paths.map { "${it.mavenId} -> ${it.jar?.path?.name}" }}"
             )
 
             val distinct = paths.distinctBy { it.resolvedVersion }
@@ -961,14 +967,14 @@ internal class KotlinPluginsStorage(
                 pluginWatchKeysReverse[new] = pluginWatchKey
             }
 
-            if (paths.any { knownByIde[it.mavenId]?.jar?.checksum != it.jar?.checksum }) {
+            if (paths.any { knownInState[it.mavenId]?.jar?.checksum != it.jar?.checksum }) {
                 logger.debug("Found new versions on disk for ${requested.descriptor.name} (${requested.requestedVersion})")
 
                 invalidateKotlinPluginCache()
             }
         }
 
-        scope.launch(CoroutineName("index-plugins-job-starter-${requested.descriptor.name}")) {
+        scope.launch(CoroutineName("index-plugins-job-starter-${requested.descriptor.name}-${requested.requestedVersion}")) {
             indexLock.withLock {
                 val running = indexJobs.computeIfAbsent(requested) { nextJob }
                 if (running != nextJob) {
@@ -1084,13 +1090,17 @@ internal class KotlinPluginsStorage(
                 null
             }
         } catch (e: Exception) {
-            logger.debug("Failed to read metadata for $found: ${e.message}")
+            logger.debug(
+                "Failed to read metadata for $found " +
+                        "(${requested.descriptor.name}, ${requested.requestedVersion}): ${e.message}"
+            )
             null
         }
 
         if (metadata == null || requested.descriptor.repositories.none { it.name == metadata.originRepositoryName }) {
             logger.debug(
-                "Invalid original repository for $found: ${metadata?.originRepositoryName}. " +
+                "Invalid original repository for $found (${requested.descriptor.name}, ${requested.requestedVersion}): " +
+                        "${metadata?.originRepositoryName}. " +
                         "Expected one of: ${requested.descriptor.repositories}"
             )
 
@@ -1149,8 +1159,19 @@ internal class KotlinPluginsStorage(
             return null
         }
 
+        val replacement = requested.descriptor.replacement
+        val artifactsPattern = if (replacement != null) {
+            val artifactString = replacement.getArtifactString(requested.artifact)
+            val versionString = replacement.getVersionString(kotlinIdeVersion, "*")
+
+            // extra * for classifiers
+            "$artifactString-$versionString*.jar"
+        } else {
+            "${requested.artifact.artifactId}-$kotlinIdeVersion-*.jar"
+        }
+
         val candidates = basePath
-            .listDirectoryEntries("${requested.artifact.artifactId}-$kotlinIdeVersion-*.jar")
+            .listDirectoryEntries(artifactsPattern)
             .toList()
 
         logger.debug("Candidates for ${requested.artifact.id}:${requested.requestedVersion} -> ${candidates.map { it.fileName }}")

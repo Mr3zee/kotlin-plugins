@@ -5,6 +5,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.Path
 
 // todo
 //  - big jar
@@ -144,6 +145,7 @@ class MyPluginTest : BasePlatformTestCase() {
                             type = KotlinArtifactsRepository.Type.URL,
                         )
                     ),
+                    replacement = null,
                 ),
                 requestedVersion = "0.2.2-dev-1".requested(),
             ),
@@ -194,6 +196,7 @@ class MyPluginTest : BasePlatformTestCase() {
                     repositories = listOf(repository),
                     ignoreExceptions = false,
                     enabled = true,
+                    replacement = null,
                 ),
             ),
         )
@@ -316,6 +319,47 @@ class MyPluginTest : BasePlatformTestCase() {
         ).orEmpty().map { it.requestedVersion.value }
 
         assertSameElements(matched, listOf("2", "3"))
+    }
+
+    fun testCustomReplacement() {
+        val descriptor = KotlinPluginDescriptor(
+            name = "kotlinx-rpc-local",
+            ids = listOf(
+                MavenId("org.jetbrains.kotlinx:compiler-plugin-cli"),
+                MavenId("org.jetbrains.kotlinx:compiler-plugin-k2"),
+                MavenId("org.jetbrains.kotlinx:compiler-plugin-backend"),
+                MavenId("org.jetbrains.kotlinx:compiler-plugin-common"),
+            ),
+            versionMatching = KotlinPluginDescriptor.VersionMatching.EXACT,
+            repositories = listOf(),
+            ignoreExceptions = false,
+            enabled = true,
+            replacement = KotlinPluginDescriptor.Replacement(
+                version = "<kotlin-version>-<lib-version>",
+                detect = "<artifact-id>",
+                search = "kotlinx-rpc-<artifact-id>",
+            ),
+        )
+
+        val requested = KotlinPluginsProvider().locateKotlinPluginDescriptorVersionedOrNull(
+            Path("compiler-plugin/compiler-plugin-k2/build/libs/compiler-plugin-k2-2.2.0-ij251-78-0.10.2.jar"),
+            descriptor,
+        ) ?: return fail("Failed to locate plugin descriptor")
+
+        assertEquals("0.10.2", requested.requestedVersion.value)
+        assertEquals(
+            "compiler-plugin-k2-2.2.20-0.10.2",
+            requested.descriptor.replacement?.getDetectString(
+                MavenId("org.jetbrains.kotlinx:compiler-plugin-k2"),
+                "2.2.20-0.10.2",
+            )
+        )
+        assertEquals(
+            "kotlinx-rpc-compiler-plugin-k2",
+            requested.descriptor.replacement?.getArtifactString(
+                MavenId("org.jetbrains.kotlinx:compiler-plugin-k2"),
+            )
+        )
     }
 
     private suspend fun loadAndAnalyzeJar(name: String): Set<String> {

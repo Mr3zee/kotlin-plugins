@@ -5,7 +5,9 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import org.jetbrains.kotlin.idea.fir.extensions.KotlinBundledFirCompilerPluginProvider
 import java.nio.file.Path
+import kotlin.io.path.extension
 import kotlin.io.path.name
+import kotlin.to
 
 @Suppress("UnstableApiUsage")
 internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
@@ -21,37 +23,72 @@ internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     }
 
     private fun Path.toKotlinPluginDescriptorVersionedOrNull(project: Project): RequestedKotlinPluginDescriptor? {
-        val stringPath = toString()
         val plugins = project.service<KotlinPluginsSettings>().safeState().plugins
 
         return plugins.filter { it.enabled }.firstNotNullOfOrNull { descriptor ->
-            val urls = descriptor.ids.map {
-                it to listOf(
-                    "${it.getPluginGroupPath()}/${it.artifactId}/",
-                    "${it.groupId}/${it.artifactId}/",
-                )
-            }
-
-            urls.firstOrNull { (_, urlVariations) ->
-                urlVariations.any { url ->
-                    stringPath.contains("/$url") || stringPath.startsWith(url)
-                }
-            }?.let { (id, _) ->
-                val coreVersion = SEMVER_REGEX.findAll(name).lastOrNull()?.value
-                    ?: run {
-                        logger.error("Couldn't find core version in plugin jar name: $name")
-                        return null
-                    }
-
-                // coreVersion (0.1.0) -> version (0.1.0-dev-123)
-                val requestedVersion = "$coreVersion${name.substringAfterLast(coreVersion).substringBeforeLast('.')}"
-                    .requested()
-
-                RequestedKotlinPluginDescriptor(descriptor, requestedVersion, id)
-            }
+            locateKotlinPluginDescriptorVersionedOrNull(this, descriptor)
         }
     }
 
+    internal fun locateKotlinPluginDescriptorVersionedOrNull(
+        path: Path,
+        descriptor: KotlinPluginDescriptor,
+    ): RequestedKotlinPluginDescriptor? {
+        return if (descriptor.replacement != null) {
+            customMatching(path, descriptor, descriptor.replacement)
+        } else {
+            val coreVersion = SEMVER_REGEX.findAll(path.name).lastOrNull()?.value
+                ?: run {
+                    return null
+                }
+
+            defaultMatching(path, descriptor, coreVersion)
+        }
+    }
+
+    private fun customMatching(
+        path: Path,
+        descriptor: KotlinPluginDescriptor,
+        replacement: KotlinPluginDescriptor.Replacement,
+    ): RequestedKotlinPluginDescriptor? {
+        val sanitizedInput = path.takeIf { it.extension == "jar" }?.name?.removeSuffix(".jar") ?: return null
+
+        descriptor.ids.forEach { id ->
+            val regex = replacement.getDetectPattern(id)
+            val matchResult = regex.find(sanitizedInput) ?: return@forEach
+            val libVersion = matchResult.groups[KotlinPluginDescriptor.Replacement.LIB_VERSION_GROUP]?.value ?: return@forEach
+
+            return RequestedKotlinPluginDescriptor(descriptor, libVersion.requested(), id)
+        }
+
+        return null
+    }
+
+    private fun defaultMatching(
+        path: Path,
+        descriptor: KotlinPluginDescriptor,
+        coreVersion: String,
+    ): RequestedKotlinPluginDescriptor? {
+        val urls = descriptor.ids.map {
+            it to listOf(
+                "${it.getPluginGroupPath()}/${it.artifactId}/",
+                "${it.groupId}/${it.artifactId}/",
+            )
+        }
+
+        val stringPath = path.toString()
+        return urls.firstOrNull { (_, urlVariations) ->
+            urlVariations.any { url ->
+                stringPath.contains("/$url") || stringPath.startsWith(url)
+            }
+        }?.let { (id, _) ->
+            // coreVersion (0.1.0) -> version (0.1.0-dev-123)
+            val requestedVersion = "$coreVersion${path.name.substringAfterLast(coreVersion).substringBeforeLast('.')}"
+                .requested()
+
+            RequestedKotlinPluginDescriptor(descriptor, requestedVersion, id)
+        }
+    }
 }
 
 private val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()

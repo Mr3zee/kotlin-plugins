@@ -8,6 +8,7 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.jetbrains.rd.util.ConcurrentHashMap
 import java.nio.file.Path
 import kotlin.collections.distinctBy
 
@@ -126,6 +127,8 @@ internal class KotlinPluginsSettings(
         @JvmField
         val plugins: Map<String, String> = emptyMap(),
         @JvmField
+        val pluginsReplacements: Map<String, String> = emptyMap(),
+        @JvmField
         val pluginsRepos: Map<String, String> = emptyMap(),
     )
 }
@@ -154,11 +157,94 @@ internal data class KotlinPluginDescriptor(
     val enabled: Boolean,
     val ignoreExceptions: Boolean,
     val repositories: List<KotlinArtifactsRepository>,
+    val replacement: Replacement?,
 ) {
     enum class VersionMatching {
         EXACT,
         SAME_MAJOR,
         LATEST,
+    }
+
+    // <PROJECT_ROOT>/compiler-plugin/compiler-plugin-k2/build/libs/compiler-plugin-k2-2.2.0-ij251-78-0.10.2.jar
+    // compiler-plugin-k2-2.2.0-ij251-78-0.10.2.jar
+    //
+    // detect: <artifactId>-<kotlin-version>-<lib-version>
+    // regex: (?<artifactId>[\w-]+?)-(?<kotlin_version>\d+\.\d+\.\d+(?:[\w-]+)?)-(?<lib_version>\d+\.\d+\.\d+(?:[\w-]+)?)
+    // search: kotlinx-rpc-<artifactId>-<kotlin-version>-<lib-version>
+    class Replacement(
+        val version: String,
+        val detect: String,
+        val search: String,
+    ) {
+        private val versionRegex by lazy {
+            version
+                .replace(
+                    VersionMacro.KOTLIN_VERSION.macro,
+                    "(?<${KOTLIN_VERSION_GROUP}>\\d+\\.\\d+\\.\\d+(?:(?:\\.|\\+|-)[\\w.+-]+)?)"
+                )
+                .replace(
+                    VersionMacro.LIB_VERSION.macro,
+                    "(?<${LIB_VERSION_GROUP}>\\d+\\.\\d+\\.\\d+(?:(?:\\.|\\+|-)[\\w.+-]+)?)"
+                )
+        }
+
+        private val detectRegexMap by lazy { ConcurrentHashMap<String, Regex>() }
+
+        fun getDetectPattern(mavenId: MavenId): Regex = detectRegexMap.computeIfAbsent(mavenId.id) {
+            detect
+                .replace(JarMacro.ARTIFACT_ID.macro, mavenId.artifactId)
+                .plus("-${versionRegex}")
+                .toRegex()
+        }
+
+        fun getVersionString(
+            kotlinVersion: String,
+            libVersion: String,
+        ): String {
+            return version
+                .replace(VersionMacro.KOTLIN_VERSION.macro, kotlinVersion)
+                .replace(VersionMacro.LIB_VERSION.macro, libVersion)
+        }
+
+        fun getDetectString(
+            mavenId: MavenId,
+            version: String,
+        ): String {
+            return detect
+                .replace(JarMacro.ARTIFACT_ID.macro, mavenId.artifactId)
+                .plus("-$version")
+        }
+
+        fun getArtifactString(
+            mavenId: MavenId,
+        ): String {
+            return search
+                .replace(JarMacro.ARTIFACT_ID.macro, mavenId.artifactId)
+        }
+
+        interface Marco {
+            val macro: String
+        }
+
+        enum class VersionMacro(macro: String) : Marco {
+            KOTLIN_VERSION("kotlin-version"),
+            LIB_VERSION("lib-version"),
+            ;
+
+            override val macro: String = "<$macro>"
+        }
+
+        enum class JarMacro(macro: String) : Marco {
+            ARTIFACT_ID("artifact-id"),
+            ;
+
+            override val macro: String = "<$macro>"
+        }
+
+        companion object {
+            const val KOTLIN_VERSION_GROUP = "kotlinVersion"
+            const val LIB_VERSION_GROUP = "libVersion"
+        }
     }
 }
 
@@ -218,6 +304,11 @@ private fun KotlinPluginsSettings.State.asStored(): KotlinPluginsSettings.Stored
         plugins = plugins.associateBy { it.name }.mapValues { (_, v) ->
             "${v.versionMatching.name};${v.enabled};${v.ignoreExceptions};${v.ids.joinToString(";") { it.id }}"
         },
+        pluginsReplacements = plugins.associateBy { it.name }
+            .filterValues { it.replacement != null }
+            .mapValues { (_, v) ->
+                "${v.replacement!!.version};${v.replacement.detect};${v.replacement.search}"
+            },
         pluginsRepos = plugins.associateBy { it.name }.mapValues { (_, v) ->
             v.repositories.joinToString(";") { it.name }
         },
@@ -257,7 +348,28 @@ internal fun KotlinPluginsSettings.StoredState.asState(): KotlinPluginsSettings.
                 versionMatching = versionMatching,
                 enabled = enabled,
                 ignoreExceptions = ignoreExceptions,
-                repositories = pluginsRepos[name].orEmpty().split(";").mapNotNull { repoByNames[it] }
+                repositories = pluginsRepos[name].orEmpty().split(";").mapNotNull { repoByNames[it] },
+                replacement = pluginsReplacements[name]?.let {
+                    val replacementList = it.split(";")
+
+                    val version = replacementList.getOrNull(0) ?: return@let null
+                    val detect = replacementList.getOrNull(1) ?: return@let null
+                    val search = replacementList.getOrNull(2) ?: return@let null
+
+                    if (validateReplacementPatternVersion(version) != null) {
+                        return@let null
+                    }
+
+                    if (validateReplacementPatternJar(detect) != null) {
+                        return@let null
+                    }
+
+                    if (validateReplacementPatternJar(search) != null) {
+                        return@let null
+                    }
+
+                    KotlinPluginDescriptor.Replacement(version, detect, search)
+                }
             )
         },
     )

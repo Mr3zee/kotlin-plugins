@@ -7,9 +7,10 @@ internal object KotlinPluginsDefaultStateLoader {
     fun loadState(): DefaultStateEntry {
         return object : DefaultStateEntry {
             private val loadedXml by lazy {
-                val resource = requireNotNull(KotlinPluginsDefaultStateLoader::class.java.classLoader.getResource("defaults.xml")) {
-                    "Failed to load defaults.xml resource"
-                }
+                val resource =
+                    requireNotNull(KotlinPluginsDefaultStateLoader::class.java.classLoader.getResource("defaults.xml")) {
+                        "Failed to load defaults.xml resource"
+                    }
 
                 JDOMUtil.load(resource)
             }
@@ -32,7 +33,6 @@ internal object KotlinPluginsDefaultStateLoader {
         val repositoriesParent = root.getChild("repositories") ?: return emptyList()
 
         return repositoriesParent.getChildren("repository").map { repoEl ->
-            // Attributes exist per schema; use safe access with require for meaningful message
             val id = requireNotNull(repoEl.getAttributeValue("id")) {
                 "repository/@id missing"
             }
@@ -101,8 +101,9 @@ internal object KotlinPluginsDefaultStateLoader {
                 "plugin/@versionMatching missing"
             }
 
-            val versionMatching = KotlinPluginDescriptor.VersionMatching.entries.find { it.name == versionMatchingString }
-                ?: error("Unknown versionMatching: $versionMatchingString for plugin $name")
+            val versionMatching =
+                KotlinPluginDescriptor.VersionMatching.entries.find { it.name == versionMatchingString }
+                    ?: error("Unknown versionMatching: $versionMatchingString for plugin $name")
 
             val repoRefs = pluginEl.getChildren("repositoryRef").map { refEl ->
                 val id = requireNotNull(refEl.getAttributeValue("id")) {
@@ -124,6 +125,35 @@ internal object KotlinPluginsDefaultStateLoader {
                 }
             }
 
+            val replacement = pluginEl.getChild("replacement")?.let { replacementEl ->
+                val version = requireNotNull(replacementEl.getChildText("version")) {
+                    "replacement/version missing"
+                }
+                val detect = requireNotNull(replacementEl.getChildText("detect")) {
+                    "replacement/detect missing"
+                }
+                val search = requireNotNull(replacementEl.getChildText("search")) {
+                    "replacement/search missing"
+                }
+
+                val validateVersionPattern = validateReplacementPatternVersion(version)
+                if (validateVersionPattern != null) {
+                    error("Invalid replacement pattern replacement/version '$version': ${validateVersionPattern.message} for plugin $name")
+                }
+
+                val validateDetectPattern = validateReplacementPatternJar(detect)
+                if (validateDetectPattern != null) {
+                    error("Invalid replacement pattern replacement/detect '$detect': ${validateDetectPattern.message} for plugin $name")
+                }
+
+                val validateSearchPattern = validateReplacementPatternJar(search)
+                if (validateSearchPattern != null) {
+                    error("Invalid replacement pattern replacement/search '$search': ${validateSearchPattern.message} for plugin $name")
+                }
+
+                KotlinPluginDescriptor.Replacement(version, detect, search)
+            }
+
             KotlinPluginDescriptor(
                 name = name,
                 ids = ids,
@@ -131,6 +161,7 @@ internal object KotlinPluginsDefaultStateLoader {
                 repositories = repoRefs,
                 enabled = true,
                 ignoreExceptions = false,
+                replacement = replacement,
             )
         }
     }

@@ -50,7 +50,7 @@ internal class ExceptionsReport(
 
     // The jar is from a local repo
     val isLocal: Boolean,
-    // The jar reloaded after to the same one exception occurred
+    // The jar reloaded with the same checksum
     val reloadedSame: Boolean,
     // Exceptions that occurred point to the binary incompatibility
     val isProbablyIncompatible: Boolean,
