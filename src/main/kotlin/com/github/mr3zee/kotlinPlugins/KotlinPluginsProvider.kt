@@ -14,6 +14,10 @@ internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
     private val logger by lazy { thisLogger() }
 
     override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {
+        if (IGNORE_LIST.any { userSuppliedPluginJar.toString().contains(it) }) {
+            return null
+        }
+
         logger.debug("Request for plugin jar: $userSuppliedPluginJar")
         val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull(project) ?: return null
         logger.debug("Found plugin descriptor: ${descriptor.descriptor.name}")
@@ -56,7 +60,8 @@ internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
         descriptor.ids.forEach { id ->
             val regex = replacement.getDetectPattern(id)
             val matchResult = regex.find(sanitizedInput) ?: return@forEach
-            val libVersion = matchResult.groups[KotlinPluginDescriptor.Replacement.LIB_VERSION_GROUP]?.value ?: return@forEach
+            val libVersion =
+                matchResult.groups[KotlinPluginDescriptor.Replacement.LIB_VERSION_GROUP]?.value ?: return@forEach
 
             return RequestedKotlinPluginDescriptor(descriptor, libVersion.requested(), id)
         }
@@ -92,3 +97,11 @@ internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
 }
 
 private val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
+
+private val IGNORE_LIST = listOf(
+    "org.jetbrains.kotlin/kotlin-scripting-jvm/",
+    "org.jetbrains.kotlin/kotlin-scripting-common/",
+    "org.jetbrains.kotlin/kotlin-stdlib/",
+    "org.jetbrains.kotlin/kotlin-script-runtime/",
+    "org.jetbrains/annotations/",
+)
