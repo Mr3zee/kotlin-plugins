@@ -20,9 +20,9 @@ internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
 
         logger.debug("Request for plugin jar: $userSuppliedPluginJar")
         val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull(project) ?: return null
-        logger.debug("Found plugin descriptor: ${descriptor.descriptor.name}")
+        logger.debug("Found plugin descriptor: ${descriptor.descriptor.name}, ${descriptor.requestedVersion}")
         return project.service<KotlinPluginsStorage>().getPluginPath(descriptor).also {
-            logger.debug("Returning plugin jar: $it")
+            logger.debug("Returning plugin jar (${descriptor.descriptor.name}, ${descriptor.requestedVersion}): $it")
         }
     }
 

@@ -38,9 +38,7 @@ import kotlin.io.path.writeText
 
 internal class BundleResult(
     val locatorResults: Map<MavenId, LocatorResult>,
-) {
-    fun allFound() = locatorResults.all { it.value is LocatorResult.Cached }
-}
+)
 
 internal sealed interface LocatorResult {
     val state: ArtifactState

@@ -20,6 +20,7 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.ScrollType
@@ -27,6 +28,7 @@ import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
@@ -63,6 +65,7 @@ import com.intellij.util.ui.tree.TreeUtil
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -95,6 +98,7 @@ import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreeNode
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.isDirectory
 
 internal class KotlinPluginsToolWindowFactory : ToolWindowFactory, DumbAware {
@@ -1264,6 +1268,7 @@ internal class KotlinPluginsTree(
         connection.dispose()
         nodesByKey.clear()
         model.setRoot(null)
+        updaterJob?.cancel()
         updaters.close()
         updaters.cancel()
     }
@@ -1280,6 +1285,8 @@ internal class KotlinPluginsTree(
         TreeUIHelper.getInstance().installTreeSpeedSearch(this)
 
         putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
+
+        startUpdatingUi()
 
         updater.reset()
 
@@ -1476,9 +1483,28 @@ internal class KotlinPluginsTree(
     }
 
     private fun updateUi(body: () -> Unit) {
-        project.service<KotlinPluginsTreeStateService>().treeScope
-            .launch(Dispatchers.EDT) {
-                body()
+        updaters.trySend(body)
+    }
+
+    private var updaterJob: Job? = null
+    private val logger = thisLogger()
+
+    private fun startUpdatingUi() {
+        updaterJob = project.service<KotlinPluginsTreeStateService>().treeScope
+            .launch(Dispatchers.EDT + CoroutineName("KotlinPluginsTreeUpdater")) {
+                while (true) {
+                    val updater = updaters.receiveCatching().getOrNull() ?: break
+
+                    try {
+                        updater.invoke()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: ProcessCanceledException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        logger.error("Error while updating Tree UI", e)
+                    }
+                }
             }
     }
 

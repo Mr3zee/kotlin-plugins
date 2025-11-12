@@ -605,13 +605,7 @@ internal class KotlinPluginsStorage(
     private fun CoroutineScope.actualize(
         plugin: VersionedKotlinPluginDescriptor,
         prevResolvedVersion: ResolvedVersion?,
-        attempt: Int = 1,
     ) {
-        if (attempt > 3) {
-            logger.debug("Actualize plugins job failed after ${attempt - 1} attempts (${plugin.descriptor.name}, ${plugin.requestedVersion})")
-            return
-        }
-
         val descriptor = plugin.descriptor
         val currentJob = actualizerJobs[plugin]
         if (currentJob != null && currentJob.isActive) {
@@ -621,7 +615,6 @@ internal class KotlinPluginsStorage(
 
         val anyJarChanged = AtomicBoolean(false)
 
-        var failedToLocate = false
         val nextJob = launch(context = CoroutineName("jar-fetcher-${descriptor.name}"), start = CoroutineStart.LAZY) {
             if (prevResolvedVersion != null) {
                 val prevPluginKey = FileWatcherPluginKey(descriptor.name, plugin.requestedVersion, prevResolvedVersion)
@@ -648,7 +641,7 @@ internal class KotlinPluginsStorage(
             val artifactsMap = pluginsCache
                 .getOrPut(descriptor.name) { ConcurrentHashMap() }
 
-            logger.debug("Actualize plugins job started (${plugin.descriptor.name}, ${plugin.requestedVersion}), attempt: $attempt")
+            logger.debug("Actualize plugins job started (${plugin.descriptor.name}, ${plugin.requestedVersion})")
 
             val known = artifactsMap.entries
                 .filter { (key, value) ->
@@ -672,7 +665,6 @@ internal class KotlinPluginsStorage(
                     status = ArtifactStatus.FailedToFetch("Unexpected error"),
                 )
                 logger.error("Actualize plugins job failed (${plugin.descriptor.name})", bundleResult.exceptionOrNull())
-                failedToLocate = true
                 return@launch
             }
 
@@ -684,8 +676,6 @@ internal class KotlinPluginsStorage(
                     ${bundle.locatorResults.entries.joinToString("\n") { "- ${it.key.id}: ${it.value.logStatus()}" }}
                 """.trimIndent()
             )
-
-            failedToLocate = !bundle.allFound()
 
             var resolvedVersion: ResolvedVersion? = null
 
@@ -813,10 +803,7 @@ internal class KotlinPluginsStorage(
                         return@invokeOnCompletion
                     }
 
-                    if (failedToLocate) {
-                        logger.debug("Actualize plugins job self restart (${plugin.descriptor.name})")
-                        scope.actualize(plugin, prevResolvedVersion, attempt + 1)
-                    } else if (anyJarChanged.get()) {
+                    if (anyJarChanged.get()) {
                         invalidateKotlinPluginCache()
                     }
                 }
