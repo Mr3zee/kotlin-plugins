@@ -107,6 +107,8 @@ that work together.
     * **Enable this plugin in the project:** A master on/off switch for this plugin bundle.
     * **Ignore plugin exceptions:** Disables the exception analyzer *only* for this specific
       plugin.
+    * **Replacement patterns** (Advanced): Modify how KEFS detects and searches for plugins. 
+      See [Replacement Patterns](#6-advanced-use-case-replacement-patterns)
 
 Adding a new plugin:
 
@@ -312,3 +314,39 @@ Your changes to the plugin will be reflected in the IDE's analysis and diagnosti
 needing to restart the IDE.
 
 See more details in the [Developer guide](PLUGIN_AUTHORS.md).
+
+## 6. Advanced Use Case: Replacement patterns
+
+![replacement_default.jpg](.github/pics/replacement_default.jpg)
+
+Replacement patterns allow changing how KEFS recognises jars.
+
+For example, if your project uses artifacts with one name, but publishes them with another name
+(Can be common during local development of the plugin). 
+In this case you tell KEFS how to match the jar and how to search for it in repositories.
+
+All patters have dedicated macros – templates that are used for matching.
+Three replacement parameters are available:
+ - **Version pattern** – how the version is parsed. Macros: `<kotlin-version>`, `<lib-version>`. 
+   
+   Default pattern: `<kotlin-version>-<lib-version>`
+   
+   Example: `2.2.0-1.0.0`
+ - **Detect pattern** – how the artifact is detected when requested by IDE. Macros: `<artifact-id>`
+   
+   Default pattern: `<artifact-id>`
+   
+   Example: if an IDE requested a jar like `prefix-compiler-plugin-2.2.0-1.0.0.jar`
+   then given the plugin's coordinates have `compiler-plugin` artifact id - it can be matched with the following pattern:
+   `prefix-<artifact-id>` (with the version pattern from above, they are concatenated using a hyphen)
+ - **Search pattern** – how the artifact is searched in repositories. Macros: `<artifact-id>`
+   
+   Default pattern: `<artifact-id>`
+   
+   Example: If KEFS searches for a jar with `org.jetbrains.kotlinx:compiler-plugin` maven id, there can be the following pattern:
+   `prefix-<artifact-id>-postfix` (with the version pattern from above, they are concatenated using a hyphen).
+   Then this will be the path used by the plugin in search:
+   `REPO_ROOT/org/jetbrains/kotlinx/prefix-compiler-plugin-postfix/2.2.0-1.0.0/prefix-compiler-plugin-postfix-2.2.0-1.0.0.jar`
+
+These examples in UI (except version pattern uses `+` as a demonstration):
+![replacement_example.jpg](.github/pics/replacement_example.jpg)

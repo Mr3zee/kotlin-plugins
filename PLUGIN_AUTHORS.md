@@ -171,3 +171,60 @@ By combining **Local Repositories** and **File Watching**, you can create a "hot
 
 Your changes to the plugin will be reflected in the IDE's analysis and diagnostics almost immediately, without you
 needing to restart the IDE.
+
+## 4. Replacement patterns
+If you develop your plugin and want to use KEFS in the same repo you might encounter a problem:
+
+When the plugin is loaded in the project – it is using the path the jar in `build` directory.
+But it is not a valid Maven repository path, so KEFS will miss it on request.
+
+More than that, this jar can have a different name from the one that you publish, 
+even to a local repository.
+
+### Example: 
+
+You have the following project structure:
+```
+.
+├── settings.gradle.kts
+├── build.gradle.kts
+├── build
+│   └── repo # this is a local maven repository
+│       └── ... (org/example/prefix-compiler-plugin/<version>/prefix-compiler-plugin-<version>.jar)
+├── compiler-plugin
+│ ├── build.gradle.kts
+│ ├── settings.gradle.kts
+│ ├── build
+│ │   └── libs
+│ │       └── compiler-plugin-1.0.0.jar # this is jar used in the project build
+│ └── src
+│     └── main
+│         ├── kotlin
+│         │   └── ...
+└── compiler-plugin-tests
+    ├── build.gradle.kts
+    └── src
+        ├── test
+        │ └── kotlin
+        │     └── ...
+        ├── test-gen
+        │   └── ...
+        └── testData
+            ├── box
+            └── diagnostics
+```
+
+Here, `compiler-plugin` is an *included build*, and `compiler-plugin-1.0.0.jar` is a jar produced by the module
+and used in the `compiler-plugin-tests` module. 
+Path to this jar is `build/libs/compiler-plugin-1.0.0.jar`, which is not a valid Maven repository path.
+
+More to that, you decided to publish your plugin with the prefix `prefix-` in its artifact coordinates:
+`org.example:prefix-compiler-plugin:2.2.20-1.0.0`.
+
+In this case, you can tell KEFS to use these replacement patterns:
+ - Detection: `<artifact-id>`
+ - Search: `prefix-<artifact-id>`
+
+Note, that is assumed that the artifact id is `compiler-plugin` in this case.
+
+Read more about how to set up replacement patterns in [KEFS Guide](GUIDE.md#6-advanced-use-case-replacement-patterns).
