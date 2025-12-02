@@ -650,7 +650,14 @@ internal class KotlinPluginsStorage(
                     k.mavenId to (v as ArtifactState.Cached).jar
                 }
 
-            val bundleResult = runCatchingExceptCancellation {
+            val bundleResult = runCatchingExceptCancellation(
+                onCancellation = {
+                    statusPublisher.updatePlugin(
+                        pluginName = descriptor.name,
+                        status = ArtifactStatus.FailedToFetch("Job was cancelled"),
+                    )
+                }
+            ) {
                 KotlinPluginsJarLocator.locateArtifacts(
                     versioned = plugin,
                     kotlinIdeVersion = kotlinIdeVersion,
@@ -1251,10 +1258,14 @@ internal class KotlinPluginsStorage(
     }
 }
 
-internal inline fun <T> runCatchingExceptCancellation(block: () -> T): Result<T> {
+internal inline fun <T> runCatchingExceptCancellation(
+    onCancellation: (Throwable) -> Unit = {},
+    block: () -> T,
+): Result<T> {
     return runCatching(block).also {
         if (it.isFailure) {
             val exception = it.exceptionOrNull() ?: return@also
+            onCancellation(exception)
             if (exception is CancellationException) {
                 throw exception
             }

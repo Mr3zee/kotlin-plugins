@@ -1176,7 +1176,9 @@ private class PluginsDialog(
                 .applyToComponent {
                     fun updateComment() {
                         if (observable.get()) {
-                            text = if (needsMavenId && (mutableIds.isEmpty() || mutableIds.none { mavenRegex.matches(it) })) {
+                            text = if (
+                                needsMavenId && (mutableIds.isEmpty() || mutableIds.none { mavenRegex.matches(it) })
+                            ) {
                                 KotlinPluginsBundle.message("settings.add.plugin.replacement.example.render.empty")
                             } else {
                                 updater(currentReplacement())
@@ -1192,10 +1194,22 @@ private class PluginsDialog(
     }
 
     private fun currentReplacement(): KotlinPluginDescriptor.Replacement {
+        val version = if (::replacementVersionField.isInitialized && replacementVersionField.text.isNotEmpty()) {
+            replacementVersionField.text
+        } else null
+
+        val detect = if (::replacementDetectField.isInitialized && replacementDetectField.text.isNotEmpty()) {
+            replacementDetectField.text
+        } else null
+
+        val search = if (::replacementSearchField.isInitialized && replacementSearchField.text.isNotEmpty()) {
+            replacementSearchField.text
+        } else null
+
         return KotlinPluginDescriptor.Replacement(
-            version = replacementVersionField.text.takeIf { it.isNotEmpty() } ?: placeholderReplacement.version,
-            detect = replacementDetectField.text.takeIf { it.isNotEmpty() } ?: placeholderReplacement.detect,
-            search = replacementSearchField.text.takeIf { it.isNotEmpty() } ?: placeholderReplacement.search,
+            version = version ?: placeholderReplacement.version,
+            detect = detect ?: placeholderReplacement.detect,
+            search = search ?: placeholderReplacement.search,
         )
     }
 
