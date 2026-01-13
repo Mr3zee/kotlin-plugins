@@ -82,6 +82,8 @@ internal class KotlinPluginsExceptionAnalyzerService(
 
                 val lookup = reporter.lookFor()
 
+                // probably improper load
+                // todo look for messages: java.lang.ClassNotFoundException: kotlinx.rpc.codegen.RpcCompilerPlugin
                 lookup.entries.find { (jarId, fqNames) ->
                     var curr: Throwable? = exception
                     while (curr != null) {
