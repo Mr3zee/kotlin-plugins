@@ -6,8 +6,8 @@
 
 ### Added
 
-#### Core Plugin Resolution
-
+* Onboarding guide: https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md
+* For compiler plugin developers guide: https://github.com/Mr3zee/kotlin-plugins/blob/main/PLUGIN_AUTHORS.md
 * **Plugin Replacement Engine:** Added the core mechanism to intercept Kotlin compiler plugin requests within the
   IDE. This allows KEFS to replace a project's plugin version (e.g. built for Kotlin `2.2.20`) with a
   version compatible with the IDE's internal compiler (e.g., `2.2.0-ij251-78`).
@@ -43,8 +43,6 @@
 * **Project Sync Hook:** KEFS now hooks into project reloads (like a Gradle sync) to clear its state and
   adapt to configuration changes.
 
-#### Exception Analysis & IDE Stability
-
 * **Runtime Exception Tracking:** Added a new feature to analyze all exceptions reported to the IDE's root
   logger.
 * **Fault Detection:** KEFS analyzes the class FQ names of all loaded plugin jars. 
@@ -59,8 +57,6 @@
   disable failing plugins and show a balloon notification.
 * **Global Toggle:** Exception Analysis can be enabled or disabled in the workspace
   settings.
-
-#### UI & Diagnostics
 
 * **"Kotlin Plugins Diagnostics" Tool Window:** Added a new tool window to provide a complete real-time
   overview of all configured compiler plugins and their artifacts.
