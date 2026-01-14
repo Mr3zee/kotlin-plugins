@@ -86,13 +86,13 @@ class MyPluginTest : BasePlatformTestCase() {
     fun testManifestDownload() = runBlocking {
         val repo = KotlinArtifactsRepository(
             name = "kotlinx-rpc for IDE",
-            value = "https://maven.pkg.jetbrains.space/public/p/krpc/for-ide",
+            value = "https://redirector.kotlinlang.org/maven/kxrpc-for-ide",
             type = KotlinArtifactsRepository.Type.URL,
         )
         val manifestResult = KotlinPluginsJarLocator.locateManifestAndGetVersionsFromRemoteRepository(
             KotlinPluginsJarLocator.ArtifactManifest.Locator.ByUrl(
                 repo,
-                "https://maven.pkg.jetbrains.space/public/p/krpc/maven/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin",
+                "https://redirector.kotlinlang.org/maven/kxrpc-eap/org/jetbrains/kotlinx/kotlinx-rpc-compiler-plugin",
             ),
         )
 
@@ -141,7 +141,7 @@ class MyPluginTest : BasePlatformTestCase() {
                     repositories = listOf(
                         KotlinArtifactsRepository(
                             name = "[testDownloadJar]",
-                            value = "https://maven.pkg.jetbrains.space/public/p/krpc/maven",
+                            value = "https://redirector.kotlinlang.org/maven/kxrpc-eap",
                             type = KotlinArtifactsRepository.Type.URL,
                         )
                     ),
@@ -166,7 +166,7 @@ class MyPluginTest : BasePlatformTestCase() {
         val state = KotlinPluginsDefaultStateLoader.loadState()
         val repository = KotlinArtifactsRepository(
             name = "kotlinx-rpc for IDE",
-            value = "https://maven.pkg.jetbrains.space/public/p/krpc/for-ide",
+            value = "https://redirector.kotlinlang.org/maven/kxrpc-for-ide",
             type = KotlinArtifactsRepository.Type.URL,
         )
 
