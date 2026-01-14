@@ -28,6 +28,7 @@ jobs:
 
   # Prepare environment and build the plugin
   build:
+    if: ${{ github.actor != 'dependabot[bot]' }}
     name: Build
     runs-on: ubuntu-latest
     outputs:
