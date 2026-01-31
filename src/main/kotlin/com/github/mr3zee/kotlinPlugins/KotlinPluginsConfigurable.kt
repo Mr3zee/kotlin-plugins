@@ -449,6 +449,8 @@ internal class KotlinPluginsConfigurable(private val project: Project) : Configu
         enableAnalyzerCheckBox.isSelected = local.exceptionAnalyzerEnabled
         autoDisablePluginsCheckBox.isEnabled = enableAnalyzerCheckBox.isSelected
         autoDisablePluginsCheckBox.isSelected = local.autoDiablePlugins
+        autoUpdateCheckBox.isSelected = local.autoUpdateEnabled
+        autoUpdateInterval.number = local.autoUpdateInterval
     }
 
     // region Repository actions
