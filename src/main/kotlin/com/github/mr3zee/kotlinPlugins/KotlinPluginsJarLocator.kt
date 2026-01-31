@@ -1001,25 +1001,30 @@ internal object KotlinPluginsJarLocator {
     internal suspend fun locateManifestAndGetVersionsLocally(
         artifactUrl: ArtifactManifest.Locator.ByPath,
     ): ManifestResult = io {
-        val manifestPath = artifactUrl.path.resolve("maven-metadata.xml")
+        val fileNames = listOf(
+            "maven-metadata.xml",
+            "maven-metadata-local.xml",
+        )
+        for (string in fileNames) {
+            val manifestPath = artifactUrl.path.resolve(string)
 
-        if (!manifestPath.exists()) {
-            return@io ManifestResult.NotFound(
-                ArtifactState.NotFound(
-                    "Manifest file does not exist: ${manifestPath.absolutePathString()}"
-                )
-            )
-        }
+            if (!manifestPath.exists()) continue
 
-        try {
-            ManifestResult.Success(parseManifestXmlToVersions(manifestPath.readText()))
-        } catch (_: Exception) {
-            ManifestResult.FailedToFetch(
-                ArtifactState.FailedToFetch(
-                    "Failed to parse manifest XML: ${manifestPath.absolutePathString()}"
+            return@io try {
+                ManifestResult.Success(parseManifestXmlToVersions(manifestPath.readText()))
+            } catch (_: Exception) {
+                ManifestResult.FailedToFetch(
+                    ArtifactState.FailedToFetch(
+                        "Failed to parse manifest XML: ${manifestPath.absolutePathString()}"
+                    )
                 )
-            )
+            }
         }
+        return@io ManifestResult.NotFound(
+            ArtifactState.NotFound(
+                "Manifest file does not exist: ${fileNames.map { artifactUrl.path.resolve(it).absolutePathString() }}"
+            )
+        )
     }
 
     private fun BundleResult.logStatus(logTag: String) {
