@@ -36,6 +36,11 @@ import kotlin.io.path.readBytes
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
+private val metadataFiles = listOf(
+    "maven-metadata.xml",
+    "maven-metadata-local.xml",
+)
+
 internal class BundleResult(
     val locatorResults: Map<MavenId, LocatorResult>,
 )
@@ -1001,12 +1006,8 @@ internal object KotlinPluginsJarLocator {
     internal suspend fun locateManifestAndGetVersionsLocally(
         artifactUrl: ArtifactManifest.Locator.ByPath,
     ): ManifestResult = io {
-        val fileNames = listOf(
-            "maven-metadata.xml",
-            "maven-metadata-local.xml",
-        )
-        for (string in fileNames) {
-            val manifestPath = artifactUrl.path.resolve(string)
+        for (metadataFileName in metadataFiles) {
+            val manifestPath = artifactUrl.path.resolve(metadataFileName)
 
             if (!manifestPath.exists()) continue
 
@@ -1022,7 +1023,7 @@ internal object KotlinPluginsJarLocator {
         }
         return@io ManifestResult.NotFound(
             ArtifactState.NotFound(
-                "Manifest file does not exist: ${fileNames.map { artifactUrl.path.resolve(it).absolutePathString() }}"
+                "None of manifest files exist: ${metadataFiles.map { artifactUrl.path.resolve(it).absolutePathString() }}"
             )
         )
     }
