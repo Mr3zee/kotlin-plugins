@@ -36,6 +36,11 @@ import kotlin.io.path.readBytes
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
+private val metadataFiles = listOf(
+    "maven-metadata.xml",
+    "maven-metadata-local.xml",
+)
+
 internal class BundleResult(
     val locatorResults: Map<MavenId, LocatorResult>,
 )
@@ -1001,25 +1006,26 @@ internal object KotlinPluginsJarLocator {
     internal suspend fun locateManifestAndGetVersionsLocally(
         artifactUrl: ArtifactManifest.Locator.ByPath,
     ): ManifestResult = io {
-        val manifestPath = artifactUrl.path.resolve("maven-metadata.xml")
+        for (metadataFileName in metadataFiles) {
+            val manifestPath = artifactUrl.path.resolve(metadataFileName)
 
-        if (!manifestPath.exists()) {
-            return@io ManifestResult.NotFound(
-                ArtifactState.NotFound(
-                    "Manifest file does not exist: ${manifestPath.absolutePathString()}"
-                )
-            )
-        }
+            if (!manifestPath.exists()) continue
 
-        try {
-            ManifestResult.Success(parseManifestXmlToVersions(manifestPath.readText()))
-        } catch (_: Exception) {
-            ManifestResult.FailedToFetch(
-                ArtifactState.FailedToFetch(
-                    "Failed to parse manifest XML: ${manifestPath.absolutePathString()}"
+            return@io try {
+                ManifestResult.Success(parseManifestXmlToVersions(manifestPath.readText()))
+            } catch (_: Exception) {
+                ManifestResult.FailedToFetch(
+                    ArtifactState.FailedToFetch(
+                        "Failed to parse manifest XML: ${manifestPath.absolutePathString()}"
+                    )
                 )
-            )
+            }
         }
+        return@io ManifestResult.NotFound(
+            ArtifactState.NotFound(
+                "None of manifest files exist: ${metadataFiles.map { artifactUrl.path.resolve(it).absolutePathString() }}"
+            )
+        )
     }
 
     private fun BundleResult.logStatus(logTag: String) {
