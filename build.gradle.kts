@@ -18,16 +18,34 @@ plugins {
 
 group = providers.gradleProperty("pluginGroup").get()
 
+// Resolve IDE version properties: use explicit values if set, otherwise fall back to pluginIdeVersionMajor
+val ideVersionMajor = providers.gradleProperty("pluginIdeVersionMajor").get()
+val explicitIdeSuffix = providers.gradleProperty("pluginIdeSuffix").get()
+val explicitSinceBuild = providers.gradleProperty("pluginSinceBuild").get()
+val explicitUntilBuild = providers.gradleProperty("pluginUntilBuild").get()
+
+val resolvedIdeSuffix = explicitIdeSuffix.ifEmpty { ideVersionMajor }
+val resolvedSinceBuild = explicitSinceBuild.ifEmpty { ideVersionMajor }
+val resolvedUntilBuild = explicitUntilBuild.ifEmpty { if (ideVersionMajor.isNotEmpty()) "$ideVersionMajor.*" else "" }
+
 // Compute version: base version + optional IDE suffix (e.g., "0.2.0-251")
 val baseVersion = providers.gradleProperty("pluginVersion").get()
-val ideSuffix = providers.gradleProperty("pluginIdeSuffix").get()
-version = if (ideSuffix.isNotEmpty()) "$baseVersion-$ideSuffix" else baseVersion
+version = if (resolvedIdeSuffix.isNotEmpty()) "$baseVersion-$resolvedIdeSuffix" else baseVersion
 
 // Set the JVM language level used to build the project.
 kotlin {
     jvmToolchain(21)
 
     explicitApi()
+
+    // Add IDE-specific source directories based on sinceBuild
+    sourceSets {
+        main {
+            if (resolvedSinceBuild.isNotEmpty()) {
+                kotlin.srcDir(file("src/$resolvedSinceBuild/kotlin"))
+            }
+        }
+    }
 }
 
 // Configure project's dependencies
@@ -104,9 +122,8 @@ intellijPlatform {
         }
 
         ideaVersion {
-            sinceBuild = providers.gradleProperty("pluginSinceBuild")
-            // If pluginUntilBuild is set, use it; otherwise leave open-ended (null)
-            untilBuild = providers.gradleProperty("pluginUntilBuild").map { it.ifEmpty { null } }
+            sinceBuild = resolvedSinceBuild.ifEmpty { null }
+            untilBuild = resolvedUntilBuild.ifEmpty { null }
         }
     }
 
@@ -121,7 +138,8 @@ intellijPlatform {
         // The pluginVersion is based on the SemVer (https://semver.org) and supports pre-release labels, like 2.1.7-alpha.3
         // Specify pre-release label to publish the plugin in a custom Release Channel automatically. Read more:
         // https://plugins.jetbrains.com/docs/intellij/deployment.html#specifying-a-release-channel
-        channels = providers.gradleProperty("pluginVersion").map { listOf(it.substringAfter('-', "").substringBefore('.').ifEmpty { "default" }) }
+        channels = providers.gradleProperty("pluginVersion")
+            .map { listOf(it.substringAfter('-', "").substringBefore('.').ifEmpty { "default" }) }
     }
 
     pluginVerification {
@@ -135,9 +153,8 @@ intellijPlatform {
                     ProductRelease.Channel.RC,
                     ProductRelease.Channel.PREVIEW,
                 )
-                sinceBuild = providers.gradleProperty("pluginSinceBuild")
-                // If pluginUntilBuild is set, use it; otherwise leave open-ended (null)
-                untilBuild = providers.gradleProperty("pluginUntilBuild").map { it.ifEmpty { null } }
+                sinceBuild = resolvedSinceBuild.ifEmpty { null }
+                untilBuild = resolvedUntilBuild.ifEmpty { null }
             }
         }
     }

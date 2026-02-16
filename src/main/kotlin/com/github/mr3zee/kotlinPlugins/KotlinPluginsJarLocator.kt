@@ -4,7 +4,7 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.util.io.delete
 import io.ktor.client.*
 import io.ktor.client.call.*
-import io.ktor.client.engine.okhttp.*
+import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -13,7 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.io.readByteArray
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
@@ -92,11 +91,10 @@ internal object KotlinPluginsJarLocator {
     private val logger by lazy { thisLogger() }
 
     private val client by lazy {
-        HttpClient(OkHttp) {
-            engine {
-                config {
-                    retryOnConnectionFailure(true)
-                }
+        HttpClient {
+            install(HttpRequestRetry) {
+                retryOnExceptionOrServerErrors(maxRetries = 3)
+                delayMillis(respectRetryAfterHeader = true) { 1000L * it }
             }
         }
     }

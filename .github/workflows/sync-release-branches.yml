@@ -1,7 +1,7 @@
 # GitHub Actions Workflow to sync versioned release branches from release/latest
 # When release/latest is updated, this workflow recreates all release/* branches
 # with IDE-specific versions by copying release/latest and adding a commit that
-# updates pluginSinceBuild, pluginUntilBuild, and pluginIdeSuffix properties
+# updates pluginSinceBuild, pluginUntilBuild, pluginIdeSuffix, and platformVersion properties
 
 name: Sync Release Branches
 on:
@@ -13,6 +13,14 @@ on:
         description: 'Comma-separated list of IDE major versions to sync (e.g., "251,252")'
         required: false
         type: string
+
+# Mapping of IDE major version to full build number for platformVersion
+# Update this mapping when adding support for new IDE versions
+env:
+  IDE_VERSION_MAP: |
+    251: 253.29346.240
+    252: 253.29346.240
+    253: 253.29346.240
 
 jobs:
   sync:
@@ -57,12 +65,31 @@ jobs:
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
 
+          # Parse the IDE version mapping
+          declare -A VERSION_MAP
+          while IFS=': ' read -r major full; do
+            major=$(echo "$major" | xargs)
+            full=$(echo "$full" | xargs)
+            if [[ -n "$major" && -n "$full" ]]; then
+              VERSION_MAP["$major"]="$full"
+            fi
+          done <<< "$IDE_VERSION_MAP"
+
           IFS=',' read -ra VERSIONS <<< "${{ steps.versions.outputs.versions }}"
           for IDE_VERSION in "${VERSIONS[@]}"; do
             IDE_VERSION=$(echo "$IDE_VERSION" | xargs) # trim whitespace
             BRANCH="release/$IDE_VERSION"
 
             echo "Syncing $BRANCH from release/latest..."
+
+            # Get platform version from mapping
+            PLATFORM_VERSION="${VERSION_MAP[$IDE_VERSION]}"
+            if [[ -z "$PLATFORM_VERSION" ]]; then
+              echo "❌ Error: No platform version mapping found for IDE version $IDE_VERSION"
+              echo "Please add a mapping for $IDE_VERSION in the IDE_VERSION_MAP in .github/workflows/sync-release-branches.yml"
+              exit 1
+            fi
+            echo "Using platformVersion: $PLATFORM_VERSION"
 
             # Create/reset the branch to match release/latest
             git checkout release/latest
@@ -73,17 +100,21 @@ jobs:
             sed -i.bak "s/^pluginSinceBuild = .*/pluginSinceBuild = ${IDE_VERSION}/" gradle.properties
             sed -i.bak "s/^pluginUntilBuild = .*/pluginUntilBuild = ${IDE_VERSION}.*/" gradle.properties
             sed -i.bak "s/^pluginIdeSuffix = .*/pluginIdeSuffix = ${IDE_VERSION}/" gradle.properties
+            sed -i.bak "s/^platformVersion = .*/platformVersion = ${PLATFORM_VERSION}/" gradle.properties
             rm gradle.properties.bak
+
+            # Build commit message
+            COMMIT_MSG="Configure for IDE version $IDE_VERSION"
+            COMMIT_BODY="This branch is auto-synced from release/latest with IDE-specific configuration:"
+            COMMIT_BODY="$COMMIT_BODY"$'\n'"- pluginSinceBuild = $IDE_VERSION"
+            COMMIT_BODY="$COMMIT_BODY"$'\n'"- pluginUntilBuild = $IDE_VERSION.*"
+            COMMIT_BODY="$COMMIT_BODY"$'\n'"- pluginIdeSuffix = $IDE_VERSION"
+            COMMIT_BODY="$COMMIT_BODY"$'\n'"- platformVersion = $PLATFORM_VERSION"
+            COMMIT_BODY="$COMMIT_BODY"$'\n'$'\n'"Do not edit this branch directly. Changes should be made to release/latest."
 
             # Commit the changes
             git add gradle.properties
-            git commit -m "Configure for IDE version $IDE_VERSION" \
-              -m "This branch is auto-synced from release/latest with IDE-specific configuration:" \
-              -m "- pluginSinceBuild = $IDE_VERSION" \
-              -m "- pluginUntilBuild = $IDE_VERSION.*" \
-              -m "- pluginIdeSuffix = $IDE_VERSION" \
-              -m "" \
-              -m "Do not edit this branch directly. Changes should be made to release/latest."
+            git commit -m "$COMMIT_MSG" -m "$COMMIT_BODY"
 
             # Force push the branch
             git push -f origin "$BRANCH"

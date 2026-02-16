@@ -14,7 +14,7 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.platform.eel.EelApi
-import com.intellij.platform.eel.provider.asNioPathOrNull
+import com.intellij.platform.eel.provider.asNioPath
 import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.util.io.createDirectories
 import com.intellij.util.messages.Topic
@@ -22,6 +22,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import org.jetbrains.kotlin.analysis.api.KaPlatformInterface
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.nio.file.FileSystems
 import java.nio.file.Files
@@ -37,7 +38,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
-import kotlin.io.path.Path
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
@@ -205,7 +205,7 @@ internal class KotlinPluginsStorage(
     }
 
     private val resolvedCacheDir = AtomicBoolean(false)
-    private var _cacheDir: Path? = null
+    private var _cacheDir: CompletableDeferred<Path?> = CompletableDeferred()
     private val scope = parentScope + SupervisorJob(parentScope.coroutineContext.job)
 
     private val watchService = FileSystems.getDefault().newWatchService()
@@ -223,7 +223,9 @@ internal class KotlinPluginsStorage(
 
     @Suppress("UnstableApiUsage")
     suspend fun cacheDir(): Path? {
-        return resolveCacheDir { project.getEelDescriptor().upgrade() }
+        return resolveCacheDir {
+            vsApi { project.getEelDescriptor().toEelApiVs() }
+        }
     }
 
     private val actualizerLock = Mutex()
@@ -1189,17 +1191,19 @@ internal class KotlinPluginsStorage(
     }.getOrNull()
 
     @Suppress("UnstableApiUsage")
-    private inline fun resolveCacheDir(getApi: () -> EelApi): Path? {
+    private suspend inline fun resolveCacheDir(getApi: () -> EelApi): Path? {
         if (!resolvedCacheDir.compareAndSet(false, true)) {
-            return _cacheDir
+            return _cacheDir.await()
         }
 
-        val userHome = getApi().fs.user.home.asNioPathOrNull() ?: Path("/") // user is nobody
-        _cacheDir = userHome.resolve(KOTLIN_PLUGINS_STORAGE_DIRECTORY).toAbsolutePath()
+        val userHome = getApi().fs.user.home.asNioPath()
+        val cacheDir = userHome.resolve(KOTLIN_PLUGINS_STORAGE_DIRECTORY).toAbsolutePath()
+        _cacheDir.complete(cacheDir)
 
-        return _cacheDir
+        return cacheDir
     }
 
+    @OptIn(KaPlatformInterface::class)
     private fun invalidateKotlinPluginCache() {
         if (project.isDisposed) {
             return
