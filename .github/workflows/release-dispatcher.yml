@@ -1,6 +1,6 @@
 # GitHub Actions Workflow that dispatches release jobs to all branches
 # Triggered when a release is published, this workflow determines all release branches
-# and triggers the actual release workflow for each branch (main + all release/*)
+# and triggers the actual release workflow for each branch (release/latest + all release/*)
 
 name: Release Dispatcher
 on:
@@ -78,8 +78,8 @@ jobs:
       - name: Get Release Branches
         id: branches
         run: |
-          # Get all release/* branches and main
-          BRANCHES=$(git branch -r | grep -E 'origin/(main|release/)' | sed 's/.*origin\///' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          # Get all release/* branches (including release/latest)
+          BRANCHES=$(git branch -r | grep -E 'origin/release/' | sed 's/.*origin\///' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "matrix=$BRANCHES" >> $GITHUB_OUTPUT
 
   release:

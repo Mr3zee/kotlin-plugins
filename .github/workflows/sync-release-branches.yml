@@ -1,0 +1,94 @@
+# GitHub Actions Workflow to sync versioned release branches from release/latest
+# When release/latest is updated, this workflow recreates all release/* branches
+# with IDE-specific versions by copying release/latest and adding a commit that
+# updates pluginSinceBuild, pluginUntilBuild, and pluginIdeSuffix properties
+
+name: Sync Release Branches
+on:
+  push:
+    branches: [ 'release/latest' ]
+  workflow_dispatch:
+    inputs:
+      ide_versions:
+        description: 'Comma-separated list of IDE major versions to sync (e.g., "251,252")'
+        required: false
+        type: string
+
+jobs:
+  sync:
+    name: Sync Release Branches
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Check out the current repository
+      - name: Fetch Sources
+        uses: actions/checkout@v5
+        with:
+          ref: release/latest
+          fetch-depth: 0
+
+      # Determine IDE versions to sync
+      - name: Determine IDE Versions
+        id: versions
+        run: |
+          if [[ -n "${{ github.event.inputs.ide_versions }}" ]]; then
+            # Manual dispatch: use provided versions
+            VERSIONS="${{ github.event.inputs.ide_versions }}"
+          else
+            # Auto sync: discover existing release/* branches with numeric suffixes
+            VERSIONS=$(git branch -r | grep -E 'origin/release/[0-9]+$' | sed 's/.*release\///' | tr '\n' ',' | sed 's/,$//')
+          fi
+
+          if [[ -z "$VERSIONS" ]]; then
+            echo "No IDE versions to sync"
+            echo "versions=" >> $GITHUB_OUTPUT
+          else
+            echo "Syncing IDE versions: $VERSIONS"
+            echo "versions=$VERSIONS" >> $GITHUB_OUTPUT
+          fi
+
+      # Sync each version
+      - name: Sync Release Branches
+        if: steps.versions.outputs.versions != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+
+          IFS=',' read -ra VERSIONS <<< "${{ steps.versions.outputs.versions }}"
+          for IDE_VERSION in "${VERSIONS[@]}"; do
+            IDE_VERSION=$(echo "$IDE_VERSION" | xargs) # trim whitespace
+            BRANCH="release/$IDE_VERSION"
+
+            echo "Syncing $BRANCH from release/latest..."
+
+            # Create/reset the branch to match release/latest
+            git checkout release/latest
+            git branch -D "$BRANCH" 2>/dev/null || true
+            git checkout -b "$BRANCH"
+
+            # Update gradle.properties with IDE-specific values
+            sed -i.bak "s/^pluginSinceBuild = .*/pluginSinceBuild = ${IDE_VERSION}/" gradle.properties
+            sed -i.bak "s/^pluginUntilBuild = .*/pluginUntilBuild = ${IDE_VERSION}.*/" gradle.properties
+            sed -i.bak "s/^pluginIdeSuffix = .*/pluginIdeSuffix = ${IDE_VERSION}/" gradle.properties
+            rm gradle.properties.bak
+
+            # Commit the changes
+            git add gradle.properties
+            git commit -m "Configure for IDE version $IDE_VERSION" \
+              -m "This branch is auto-synced from release/latest with IDE-specific configuration:" \
+              -m "- pluginSinceBuild = $IDE_VERSION" \
+              -m "- pluginUntilBuild = $IDE_VERSION.*" \
+              -m "- pluginIdeSuffix = $IDE_VERSION" \
+              -m "" \
+              -m "Do not edit this branch directly. Changes should be made to release/latest."
+
+            # Force push the branch
+            git push -f origin "$BRANCH"
+
+            echo "✓ Synced $BRANCH"
+          done
+
+          echo "All release branches synced successfully"

@@ -14,7 +14,7 @@
 
 name: Build
 on:
-  # Trigger the workflow on pushes to main and IDE-specific branches (e.g., release/251, release/252)
+  # Trigger the workflow on pushes to main and release branches (release/latest and release/*)
   push:
     branches: [ main, 'release/*' ]
   # Trigger the workflow on any pull request
@@ -209,10 +209,10 @@ jobs:
 
   # Prepare a draft release for GitHub Releases page for the manual verification
   # If accepted and published, the release workflow would be triggered
-  # Only runs on main branch to avoid duplicate drafts from release/* branches
+  # Only runs on release/latest branch to avoid duplicate drafts
   releaseDraft:
     name: Release draft
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/release/latest'
     needs: [ build, test, inspectCode, verify ]
     runs-on: ubuntu-latest
     permissions:

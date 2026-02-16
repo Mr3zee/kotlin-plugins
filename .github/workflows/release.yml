@@ -33,12 +33,11 @@ jobs:
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
           # Extract IDE suffix from branch name (e.g., release/251 -> 251)
+          # release/latest has no suffix (open-ended)
           if [[ "$BRANCH" =~ ^release/([0-9]+)$ ]]; then
             echo "ide_suffix=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-            echo "is_main=false" >> $GITHUB_OUTPUT
           else
             echo "ide_suffix=" >> $GITHUB_OUTPUT
-            echo "is_main=true" >> $GITHUB_OUTPUT
           fi
 
       # Free GitHub Actions Environment Disk Space
