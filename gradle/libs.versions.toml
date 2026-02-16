@@ -9,7 +9,7 @@ kotlin = "2.3.10"
 kover = "0.9.3"
 qodana = "2025.2.2"
 jsoup = "1.21.2"
-serialization = "1.9.0"
+serialization = "1.10.0"
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
