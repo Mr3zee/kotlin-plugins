@@ -1,15 +1,22 @@
-# GitHub Actions Workflow created for handling the release process based on the draft release prepared with the Build workflow.
+# GitHub Actions Workflow for publishing the plugin to JetBrains Marketplace
+# This workflow is called by release-dispatcher.yml for each release branch
 # Running the publishPlugin task requires all the following secrets to be provided: PUBLISH_TOKEN, PRIVATE_KEY, PRIVATE_KEY_PASSWORD, CERTIFICATE_CHAIN.
 # See https://plugins.jetbrains.com/docs/intellij/plugin-signing.html for more information.
 
 name: Release
 on:
-  release:
-    types: [prereleased, released]
+  workflow_call:
+    inputs:
+      branch:
+        description: 'Branch to release from (main or release/*)'
+        required: true
+        type: string
+      tag:
+        description: 'Release tag name'
+        required: true
+        type: string
 
 jobs:
-
-  # Prepare and publish the plugin to JetBrains Marketplace repository
   release:
     name: Publish Plugin
     runs-on: ubuntu-latest
@@ -17,6 +24,22 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+
+      # Determine IDE suffix from the branch name
+      - name: Determine Release Config
+        id: config
+        run: |
+          BRANCH="${{ inputs.branch }}"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+          # Extract IDE suffix from branch name (e.g., release/251 -> 251)
+          if [[ "$BRANCH" =~ ^release/([0-9]+)$ ]]; then
+            echo "ide_suffix=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "is_main=false" >> $GITHUB_OUTPUT
+          else
+            echo "ide_suffix=" >> $GITHUB_OUTPUT
+            echo "is_main=true" >> $GITHUB_OUTPUT
+          fi
 
       # Free GitHub Actions Environment Disk Space
       - name: Maximize Build Space
@@ -29,7 +52,7 @@ jobs:
       - name: Fetch Sources
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.branch }}
 
       # Set up the Java environment for the next steps
       - name: Setup Java
@@ -44,18 +67,6 @@ jobs:
         with:
           cache-read-only: true
 
-      # Update the Unreleased section with the current release note
-      - name: Patch Changelog
-        if: ${{ github.event.release.body != '' }}
-        env:
-          CHANGELOG: ${{ github.event.release.body }}
-        run: |
-          RELEASE_NOTE="./build/tmp/release_note.txt"
-          mkdir -p "$(dirname "$RELEASE_NOTE")"
-          echo "$CHANGELOG" > $RELEASE_NOTE
-
-          ./gradlew patchChangelog --release-note-file=$RELEASE_NOTE
-
       # Publish the plugin to JetBrains Marketplace
       - name: Publish Plugin
         env:
@@ -63,38 +74,10 @@ jobs:
           CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
-        run: ./gradlew publishPlugin
+        run: ./gradlew publishPlugin -PpluginIdeSuffix=${{ steps.config.outputs.ide_suffix }}
 
       # Upload an artifact as a release asset
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.event.release.tag_name }} ./build/distributions/*
-
-      # Create a pull request
-      - name: Create Pull Request
-        if: ${{ github.event.release.body != '' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          BRANCH="changelog-update-$VERSION"
-          LABEL="release changelog"
-
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-
-          git checkout -b $BRANCH
-          git commit -am "Changelog update - $VERSION"
-          git push --set-upstream origin $BRANCH
-
-          gh label create "$LABEL" \
-            --description "Pull requests with release changelog update" \
-            --force \
-            || true
-
-          gh pr create \
-            --title "Changelog update - \`$VERSION\`" \
-            --body "Current pull request contains patched \`CHANGELOG.md\` file for the \`$VERSION\` version." \
-            --label "$LABEL" \
-            --head $BRANCH
+        run: gh release upload ${{ inputs.tag }} ./build/distributions/*

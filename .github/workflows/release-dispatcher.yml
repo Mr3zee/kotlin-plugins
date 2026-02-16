@@ -1,0 +1,97 @@
+# GitHub Actions Workflow that dispatches release jobs to all branches
+# Triggered when a release is published, this workflow determines all release branches
+# and triggers the actual release workflow for each branch (main + all release/*)
+
+name: Release Dispatcher
+on:
+  release:
+    types: [prereleased, released]
+
+jobs:
+  dispatch:
+    name: Dispatch Release Jobs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      branches: ${{ steps.branches.outputs.matrix }}
+    steps:
+      # Check out the current repository
+      - name: Fetch Sources
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Set up the Java environment for changelog updates
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: 21
+
+      # Setup Gradle
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      # Update the Unreleased section with the current release note (once for all releases)
+      - name: Patch Changelog
+        if: github.event.release.body != ''
+        env:
+          CHANGELOG: ${{ github.event.release.body }}
+        run: |
+          RELEASE_NOTE="./build/tmp/release_note.txt"
+          mkdir -p "$(dirname "$RELEASE_NOTE")"
+          echo "$CHANGELOG" > $RELEASE_NOTE
+
+          ./gradlew patchChangelog --release-note-file=$RELEASE_NOTE
+
+      # Create a pull request with changelog updates
+      - name: Create Pull Request
+        if: github.event.release.body != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          BRANCH="changelog-update-$VERSION"
+          LABEL="release changelog"
+
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+
+          git checkout -b $BRANCH
+          git commit -am "Changelog update - $VERSION"
+          git push --set-upstream origin $BRANCH
+
+          gh label create "$LABEL" \
+            --description "Pull requests with release changelog update" \
+            --force \
+            || true
+
+          gh pr create \
+            --title "Changelog update - \`$VERSION\`" \
+            --body "Current pull request contains patched \`CHANGELOG.md\` file for the \`$VERSION\` version." \
+            --label "$LABEL" \
+            --head $BRANCH
+
+      # Get all release branches
+      - name: Get Release Branches
+        id: branches
+        run: |
+          # Get all release/* branches and main
+          BRANCHES=$(git branch -r | grep -E 'origin/(main|release/)' | sed 's/.*origin\///' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "matrix=$BRANCHES" >> $GITHUB_OUTPUT
+
+  release:
+    name: Release (${{ matrix.branch }})
+    needs: dispatch
+    if: needs.dispatch.outputs.branches != '[]'
+    strategy:
+      matrix:
+        branch: ${{ fromJson(needs.dispatch.outputs.branches) }}
+      fail-fast: false
+    uses: ./.github/workflows/release.yml
+    with:
+      branch: ${{ matrix.branch }}
+      tag: ${{ github.event.release.tag_name }}
+    secrets: inherit

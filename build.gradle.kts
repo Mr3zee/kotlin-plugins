@@ -17,7 +17,11 @@ plugins {
 }
 
 group = providers.gradleProperty("pluginGroup").get()
-version = providers.gradleProperty("pluginVersion").get()
+
+// Compute version: base version + optional IDE suffix (e.g., "0.2.0-251")
+val baseVersion = providers.gradleProperty("pluginVersion").get()
+val ideSuffix = providers.gradleProperty("pluginIdeSuffix").get()
+version = if (ideSuffix.isNotEmpty()) "$baseVersion-$ideSuffix" else baseVersion
 
 // Set the JVM language level used to build the project.
 kotlin {
@@ -31,6 +35,7 @@ repositories {
     mavenCentral()
 
     // IntelliJ Platform Gradle Plugin Repositories Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-repositories-extension.html
+    // search for com.jetbrains.intellij.idea
     intellijPlatform {
         defaultRepositories() // https://www.jetbrains.com/intellij-repository/releases, search com.jetbrains.intellij.idea
         jetbrainsRuntime()
@@ -100,8 +105,8 @@ intellijPlatform {
 
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")
-            // unlimited
-            untilBuild = provider { null }
+            // If pluginUntilBuild is set, use it; otherwise leave open-ended (null)
+            untilBuild = providers.gradleProperty("pluginUntilBuild").map { it.ifEmpty { null } }
         }
     }
 
@@ -131,8 +136,8 @@ intellijPlatform {
                     ProductRelease.Channel.PREVIEW,
                 )
                 sinceBuild = providers.gradleProperty("pluginSinceBuild")
-                // unlimited
-                untilBuild = provider { null }
+                // If pluginUntilBuild is set, use it; otherwise leave open-ended (null)
+                untilBuild = providers.gradleProperty("pluginUntilBuild").map { it.ifEmpty { null } }
             }
         }
     }
