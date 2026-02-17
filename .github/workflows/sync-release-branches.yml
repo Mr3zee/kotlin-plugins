@@ -31,7 +31,7 @@ jobs:
     steps:
       # Check out the current repository
       - name: Fetch Sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: release/latest
           fetch-depth: 0
