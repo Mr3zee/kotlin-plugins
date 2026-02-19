@@ -24,9 +24,9 @@ val explicitIdeSuffix = providers.gradleProperty("pluginIdeSuffix").get()
 val explicitSinceBuild = providers.gradleProperty("pluginSinceBuild").get()
 val explicitUntilBuild = providers.gradleProperty("pluginUntilBuild").get()
 
-val resolvedIdeSuffix = explicitIdeSuffix.ifEmpty { ideVersionMajor }
-val resolvedSinceBuild = explicitSinceBuild.ifEmpty { ideVersionMajor }
-val resolvedUntilBuild = explicitUntilBuild.ifEmpty { if (ideVersionMajor.isNotEmpty()) "$ideVersionMajor.*" else "" }
+val resolvedSinceBuild = ideVersionMajor.ifEmpty { explicitSinceBuild }
+val resolvedUntilBuild = (if (ideVersionMajor.isNotEmpty()) "$ideVersionMajor.*" else "").ifEmpty { explicitUntilBuild }
+val resolvedIdeSuffix = ideVersionMajor.ifEmpty { explicitIdeSuffix }.ifEmpty { resolvedSinceBuild }
 
 // Compute version: base version + optional IDE suffix (e.g., "0.2.0-251")
 val baseVersion = providers.gradleProperty("pluginVersion").get()

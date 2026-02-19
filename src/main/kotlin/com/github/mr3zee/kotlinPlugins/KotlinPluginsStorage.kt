@@ -12,6 +12,7 @@ import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.provider.asNioPath
@@ -835,28 +836,35 @@ internal class KotlinPluginsStorage(
 
         logger.debug(
             "Cached versions for ${requested.requestedVersion} (${requested.descriptor.name}): " +
-                    "${paths.filter { it.second != null }.map { "${it.first} -> ${it.second?.resolvedVersion}" }}"
+                    "${
+                        paths.filter { (_, cached) -> cached != null }
+                            .map { (id, cached) -> "$id -> ${cached?.resolvedVersion}" }
+                    }"
         )
 
-        val allExist = paths.all { it.second?.jar?.path?.exists() == true }
-        val differentVersions = paths.distinctBy { it.second?.resolvedVersion }.count()
+        val allExist = paths.all { (_, cached) -> cached?.jar?.path?.exists() == true }
+        val differentVersions = paths.distinctBy { (_, cached) -> cached?.resolvedVersion }.count()
 
         // return not null only when all requested plugins are present and have the same version
         if (!allExist || differentVersions != 1) {
             logger.debug("Requested plugins not found in full (${requested.descriptor.name}, ${requested.requestedVersion})")
             // no requested version is present for all requested plugins, or versions are not equal
-            updateCacheFromDisk(requested, pluginMap, kotlinIdeVersion, paths.associate { it })
+            updateCacheFromDisk(requested, pluginMap, kotlinIdeVersion)
             return null
         }
 
-        logger.debug("All versions for ${requested.requestedVersion} (${requested.descriptor.name}) are present")
+        logger.debug("All ${paths.size} version(s) for ${requested.requestedVersion} (${requested.descriptor.name}) are present")
 
-        val state = paths.find { it.first == requested.artifact.id }?.second
+        val state = paths.find { (id, _) -> id == requested.artifact.id }?.second
             ?: error("Should not happen")
 
         val reporter = project.service<KotlinPluginsExceptionReporter>()
-        val hasExceptions =
-            reporter.hasExceptions(requested.descriptor.name, requested.artifact.id, requested.requestedVersion)
+
+        val hasExceptions = reporter.hasExceptions(
+            pluginName = requested.descriptor.name,
+            mavenId = requested.artifact.id,
+            requestedVersion = requested.requestedVersion,
+        )
 
         val status = if (hasExceptions) {
             ArtifactStatus.ExceptionInRuntime(
@@ -885,7 +893,6 @@ internal class KotlinPluginsStorage(
         requested: RequestedKotlinPluginDescriptor,
         pluginMap: ConcurrentHashMap<RequestedPluginKey, ArtifactState>,
         kotlinIdeVersion: String,
-        knownInState: Map<String, ArtifactState.Cached?>,
     ) {
         if (indexJobs[requested]?.isActive == true) {
             logger.debug("Update cache from disk job is already running for ${requested.descriptor.name} (${requested.requestedVersion})")
@@ -941,8 +948,11 @@ internal class KotlinPluginsStorage(
                 return@launch
             }
 
-            val pluginWatchKey =
-                FileWatcherPluginKey(requested.descriptor.name, requested.requestedVersion, resolvedVersion)
+            val pluginWatchKey = FileWatcherPluginKey(
+                pluginName = requested.descriptor.name,
+                requestedVersion = requested.requestedVersion,
+                resolvedVersion = resolvedVersion,
+            )
 
             val new = withContext(Dispatchers.IO) {
                 val newPath = cacheDirectory(
@@ -963,11 +973,7 @@ internal class KotlinPluginsStorage(
                 pluginWatchKeysReverse[new] = pluginWatchKey
             }
 
-            if (paths.any { knownInState[it.mavenId]?.jar?.checksum != it.jar?.checksum }) {
-                logger.debug("Found new versions on disk for ${requested.descriptor.name} (${requested.requestedVersion})")
-
-                invalidateKotlinPluginCache()
-            }
+            invalidateKotlinPluginCache()
         }
 
         scope.launch(CoroutineName("index-plugins-job-starter-${requested.descriptor.name}-${requested.requestedVersion}")) {
@@ -1213,11 +1219,13 @@ internal class KotlinPluginsStorage(
 
         val provider = KotlinCompilerPluginsProvider.getInstance(project)
 
+        // clear Kotlin plugin caches
         if (provider is Disposable) {
-            provider.dispose() // clear Kotlin plugin caches
+            Disposer.dispose(provider)
+            logger.debug("Invalidated KotlinCompilerPluginsProvider")
+        } else {
+            logger.warn("Failed to invalidate the KotlinCompilerPluginsProvider")
         }
-
-        logger.debug("Invalidated KotlinCompilerPluginsProvider")
     }
 
     companion object {
