@@ -82,8 +82,13 @@ internal class KotlinPluginsExceptionAnalyzerService(
 
                 val lookup = reporter.lookFor()
 
-                // probably improper load
-                // todo look for messages: java.lang.ClassNotFoundException: kotlinx.rpc.codegen.RpcCompilerPlugin
+                if (is_KTIJ_37664(exception, lookup)) {
+                    project.service<KotlinPluginsStorage>()
+                        .invalidateKotlinPluginCache()
+
+                    continue
+                }
+
                 lookup.entries.find { (jarId, fqNames) ->
                     var curr: Throwable? = exception
                     while (curr != null) {
@@ -107,6 +112,35 @@ internal class KotlinPluginsExceptionAnalyzerService(
                     isProbablyIncompatible = exception.isProbablyIncompatible(),
                 )
             }
+        }
+
+        // TODO: this is a second workaround for KTIJ-37664 for IDE versions before 261
+        //  if the first one with debounce failed to work.
+        //  Remove when we drop support for these versions.
+        @Suppress("FunctionName", "LocalVariableName")
+        private fun is_KTIJ_37664(
+            exception: Throwable,
+            lookup: Map<JarId, Set<String>>,
+        ): Boolean {
+            val message = exception.message ?: return false
+
+            val isClassNotFoundException = lookup.values.flatten().any { fqName ->
+                message.contains("java.lang.ClassNotFoundException: $fqName")
+            }
+
+            if (!isClassNotFoundException) {
+                return false
+            }
+
+            val isKTIJ_27664 = exception.stackTrace.any {
+                it.className == "org.jetbrains.kotlin.util.ServiceLoaderLite" &&
+                        it.methodName == "loadImplementations"
+            } && exception.stackTrace.any {
+                it.className == "org.jetbrains.kotlin.idea.fir.extensions.KtCompilerPluginsProviderIdeImpl" ||
+                        it.className == "org.jetbrains.kotlin.idea.fir.extensions.KtCompilerPluginsCache"
+            }
+
+            return isKTIJ_27664
         }
 
         override fun publish(record: LogRecord) {

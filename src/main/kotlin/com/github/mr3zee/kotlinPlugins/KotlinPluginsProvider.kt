@@ -1,7 +1,6 @@
 package com.github.mr3zee.kotlinPlugins
 
 import com.intellij.openapi.components.service
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import org.jetbrains.kotlin.idea.fir.extensions.KotlinBundledFirCompilerPluginProvider
 import java.nio.file.Path
@@ -11,18 +10,18 @@ import kotlin.to
 
 @Suppress("UnstableApiUsage")
 internal class KotlinPluginsProvider : KotlinBundledFirCompilerPluginProvider {
-    private val logger by lazy { thisLogger() }
-
     override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {
-        if (IGNORE_LIST.any { userSuppliedPluginJar.toString().contains(it) }) {
-            return null
-        }
+        val storage = project.service<KotlinPluginsStorage>()
+        storage.recordProviderCallStart()
+        try {
+            if (IGNORE_LIST.any { userSuppliedPluginJar.toString().contains(it) }) {
+                return null
+            }
 
-        logger.debug("Request for plugin jar: $userSuppliedPluginJar")
-        val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull(project) ?: return null
-        logger.debug("Found plugin descriptor: ${descriptor.descriptor.name}, ${descriptor.requestedVersion}")
-        return project.service<KotlinPluginsStorage>().getPluginPath(descriptor).also {
-            logger.debug("Returning plugin jar (${descriptor.descriptor.name}, ${descriptor.requestedVersion}): $it")
+            val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull(project) ?: return null
+            return storage.getPluginPath(descriptor)
+        } finally {
+            storage.recordProviderCallEnd()
         }
     }
 

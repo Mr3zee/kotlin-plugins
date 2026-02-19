@@ -36,6 +36,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
@@ -239,6 +240,18 @@ internal class KotlinPluginsStorage(
 
     private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<RequestedPluginKey, ArtifactState>>()
 
+    private val lifecycleCache = ConcurrentHashMap<String, Map<String, Path>>()
+
+    private val invalidationPending = AtomicBoolean(false)
+    private val lastProvideCallTimestamp = AtomicLong(0)
+    private val providerCallInProgress = AtomicLong(0L)
+    private val providerDebounceJob = AtomicReference<Job?>(null)
+
+    companion object {
+        const val KOTLIN_PLUGINS_STORAGE_DIRECTORY = ".kotlinPlugins"
+        private const val INVALIDATION_DEBOUNCE_MS = 750L
+    }
+
     private val statusPublisher by lazy {
         project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC)
     }
@@ -254,6 +267,8 @@ internal class KotlinPluginsStorage(
 
     private suspend inline fun internalClearStateNoInvalidate(and: () -> Unit = {}) {
         try {
+            invalidationPending.set(true)
+
             while (true) {
                 actualizerJobs.values.forEach { it.cancelAndJoin() }
                 if (actualizerLock.tryLock()) {
@@ -274,6 +289,7 @@ internal class KotlinPluginsStorage(
             indexJobs.clear()
 
             pluginsCache.clear()
+            lifecycleCache.clear()
 
             pluginWatchKeys.values.forEach { it.cancel() }
             pluginWatchKeys.clear()
@@ -372,6 +388,7 @@ internal class KotlinPluginsStorage(
 
         scope.coroutineContext.job.invokeOnCompletion {
             pluginsCache.clear()
+            lifecycleCache.clear()
             actualizerJobs.clear()
             indexJobs.clear()
             pluginWatchKeys.clear()
@@ -380,6 +397,7 @@ internal class KotlinPluginsStorage(
             originalWatchKeysReverse.clear()
             runCatchingExceptCancellation { watchService.close() } // can throw IOException
             fileWatcherThread.shutdown()
+            providerDebounceJob.get()?.cancel()
             logger.debug("Storage closed")
         }
 
@@ -824,6 +842,19 @@ internal class KotlinPluginsStorage(
     }
 
     fun getPluginPath(requested: RequestedKotlinPluginDescriptor): Path? {
+        // If invalidation is pending, return null
+        if (invalidationPending.get()) {
+            logger.debug("Invalidation pending ${requested.descriptor.name}:${requested.artifact.id} (${requested.requestedVersion})")
+            return null
+        }
+
+        // Check lifecycle cache first - returns cached value if lifecycle is active
+        lifecycleCache[requested.descriptor.name]?.let { cachedResult ->
+            val cachedPath = cachedResult.getValue(requested.artifact.id)
+            logger.debug("Lifecycle cached value found for ${requested.descriptor.name}:${requested.artifact.id} (${requested.requestedVersion})")
+            return cachedPath
+        }
+
         val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
 
         val pluginMap = pluginsCache.getOrPut(requested.descriptor.name) {
@@ -852,6 +883,12 @@ internal class KotlinPluginsStorage(
             updateCacheFromDisk(requested, pluginMap, kotlinIdeVersion)
             return null
         }
+
+        lifecycleCache[requested.descriptor.name] = paths
+            .associate { it }
+            .mapValues { (_, state) ->
+                state!!.jar.path // non-null by allExist guaranteed
+            }
 
         logger.debug("All ${paths.size} version(s) for ${requested.requestedVersion} (${requested.descriptor.name}) are present")
 
@@ -974,6 +1011,8 @@ internal class KotlinPluginsStorage(
             }
 
             invalidateKotlinPluginCache()
+
+            logger.debug("Cache from disk update finished for ${requested.descriptor.name} (${requested.requestedVersion})")
         }
 
         scope.launch(CoroutineName("index-plugins-job-starter-${requested.descriptor.name}-${requested.requestedVersion}")) {
@@ -1209,27 +1248,66 @@ internal class KotlinPluginsStorage(
         return cacheDir
     }
 
-    @OptIn(KaPlatformInterface::class)
-    private fun invalidateKotlinPluginCache() {
+    fun recordProviderCallStart() {
+        providerCallInProgress.getAndIncrement()
+    }
+
+    fun recordProviderCallEnd() {
+        lastProvideCallTimestamp.set(System.currentTimeMillis())
+        providerCallInProgress.getAndDecrement()
+    }
+
+    fun invalidateKotlinPluginCache() {
         if (project.isDisposed) {
             return
         }
 
+        // Mark invalidation as pending, otherwise leave
+        if (!invalidationPending.compareAndSet(false, true)) {
+            return
+        }
+
+        // Clear the lifecycle immediately
+        lifecycleCache.clear()
         statusPublisher.reset()
 
+        providerDebounceJob.getAndSet(null)?.cancel()
+
+        // TODO: this is a workaround for KTIJ-37664 for IDE versions before 261
+        //  remove when we drop support for them
+        val newJob = scope.launch(CoroutineName("provider-debounce")) {
+            while (true) {
+                if (providerCallInProgress.get() > 0) {
+                    delay(INVALIDATION_DEBOUNCE_MS)
+                    continue
+                }
+
+                val timeSinceLastCall = System.currentTimeMillis() - lastProvideCallTimestamp.get()
+                if (timeSinceLastCall >= INVALIDATION_DEBOUNCE_MS) {
+                    break
+                }
+
+                delay(INVALIDATION_DEBOUNCE_MS - timeSinceLastCall)
+            }
+
+            doInvalidate()
+            invalidationPending.set(false)
+        }
+
+        providerDebounceJob.set(newJob)
+    }
+
+    @OptIn(KaPlatformInterface::class)
+    private fun doInvalidate() {
         val provider = KotlinCompilerPluginsProvider.getInstance(project)
 
         // clear Kotlin plugin caches
         if (provider is Disposable) {
             Disposer.dispose(provider)
-            logger.debug("Invalidated KotlinCompilerPluginsProvider")
+            logger.debug("Invalidated KotlinCompilerPluginsProvider after debounce")
         } else {
             logger.warn("Failed to invalidate the KotlinCompilerPluginsProvider")
         }
-    }
-
-    companion object {
-        const val KOTLIN_PLUGINS_STORAGE_DIRECTORY = ".kotlinPlugins"
     }
 
     private fun Watchable.registerSafe(vararg events: WatchEvent.Kind<*>): WatchKey? {
