@@ -14,9 +14,9 @@
 
 name: Build
 on:
-  # Trigger the workflow on pushes to main and release branches (release/latest and release/*)
+  # Trigger the workflow on pushes to main and release/latest
   push:
-    branches: [ main, 'release/*' ]
+    branches: [ main, 'release/latest' ]
   # Trigger the workflow on any pull request
   pull_request:
 

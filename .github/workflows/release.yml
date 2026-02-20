@@ -1,5 +1,5 @@
 # GitHub Actions Workflow for publishing the plugin to JetBrains Marketplace
-# This workflow is called by release-dispatcher.yml for each release branch
+# This workflow is called by release-dispatcher.yml for each IDE version
 # Running the publishPlugin task requires all the following secrets to be provided: PUBLISH_TOKEN, PRIVATE_KEY, PRIVATE_KEY_PASSWORD, CERTIFICATE_CHAIN.
 # See https://plugins.jetbrains.com/docs/intellij/plugin-signing.html for more information.
 
@@ -7,10 +7,11 @@ name: Release
 on:
   workflow_call:
     inputs:
-      branch:
-        description: 'Branch to release from (main or release/*)'
-        required: true
+      ide_version_major:
+        description: 'IDE major version (e.g., "251"). Empty for the open-ended (latest) release.'
+        required: false
         type: string
+        default: ''
       tag:
         description: 'Release tag name'
         required: true
@@ -25,21 +26,6 @@ jobs:
       pull-requests: write
     steps:
 
-      # Determine IDE suffix from the branch name
-      - name: Determine Release Config
-        id: config
-        run: |
-          BRANCH="${{ inputs.branch }}"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-
-          # Extract IDE suffix from branch name (e.g., release/251 -> 251)
-          # release/latest has no suffix (open-ended)
-          if [[ "$BRANCH" =~ ^release/([0-9]+)$ ]]; then
-            echo "ide_suffix=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-          else
-            echo "ide_suffix=" >> $GITHUB_OUTPUT
-          fi
-
       # Free GitHub Actions Environment Disk Space
       - name: Maximize Build Space
         uses: jlumbroso/free-disk-space@v1.3.1
@@ -51,7 +37,7 @@ jobs:
       - name: Fetch Sources
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.branch }}
+          ref: release/latest
 
       # Set up the Java environment for the next steps
       - name: Setup Java
@@ -73,7 +59,7 @@ jobs:
           CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
-        run: ./gradlew publishPlugin -PpluginIdeSuffix=${{ steps.config.outputs.ide_suffix }}
+        run: ./gradlew publishPlugin -PpluginIdeVersionMajor=${{ inputs.ide_version_major }}
 
       # Upload an artifact as a release asset
       - name: Upload Release Asset

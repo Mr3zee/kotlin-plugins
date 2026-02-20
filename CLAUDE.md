@@ -26,8 +26,8 @@ Plugin ID: `com.github.mr3zee.kotlinPlugins`
 # Verify plugin compatibility with multiple IDE versions
 ./gradlew verifyPlugin
 
-# Run for a specific IDE major version (take platform version from IDE_VERSION_MAP in .github/workflows/sync-release-branches.yml)
-./gradlew runIde -PpluginIdeVersionMajor=253 -PplatformVersion=253.29346.240 --stacktrace
+# Run for a specific IDE major version (platformVersion and kotlin.lang are auto-resolved from the IDE version map in gradle.properties)
+./gradlew runIde -PpluginIdeVersionMajor=253 --stacktrace
 ```
 
 Requires **JDK 21** (configured via Gradle toolchain). Uses **Gradle 9.2.0** with configuration cache and build cache enabled.
@@ -90,11 +90,11 @@ The plugin supports multiple IntelliJ platform versions. `VersionSpecificApi` de
 
 ### Multi-Version Release
 
-`pluginIdeVersionMajor` in `gradle.properties` controls version-specific builds. When set (e.g., `251`), it auto-populates `sinceBuild`, `untilBuild`, and version suffix. The CI release workflow builds separate artifacts per IDE version.
+`pluginIdeVersionMajor` in `gradle.properties` controls version-specific builds. When set (e.g., `251`), it auto-populates `sinceBuild`, `untilBuild`, version suffix, `platformVersion`, and Kotlin compiler version from the `ide.<major>.*` map in `gradle.properties`. The CI release dispatcher (`release-dispatcher.yml`) reads the IDE versions from this map and triggers parallel release jobs.
 
 ## Key Configuration
 
-- `gradle.properties`: `platformVersion` sets the target IntelliJ version; `pluginSinceBuild`/`pluginUntilBuild` set compatibility range
+- `gradle.properties`: `platformVersion` sets the default target IntelliJ version; `ide.<major>.platformVersion`/`ide.<major>.kotlinLang` map auto-resolves versions per IDE major; `pluginSinceBuild`/`pluginUntilBuild` set compatibility range
 - `gradle/libs.versions.toml`: dependency version catalog
 - `src/main/resources/defaults.xml`: bundled default repositories and plugin descriptors
 - `src/main/resources/META-INF/plugin.xml`: extension points, actions, and service declarations

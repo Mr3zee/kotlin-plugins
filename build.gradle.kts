@@ -28,6 +28,18 @@ val resolvedSinceBuild = ideVersionMajor.ifEmpty { explicitSinceBuild }
 val resolvedUntilBuild = (if (ideVersionMajor.isNotEmpty()) "$ideVersionMajor.*" else "").ifEmpty { explicitUntilBuild }
 val resolvedIdeSuffix = ideVersionMajor.ifEmpty { explicitIdeSuffix }.ifEmpty { resolvedSinceBuild }
 
+// Resolve platformVersion: explicit -PplatformVersion takes precedence, otherwise look up from IDE version map
+val resolvedPlatformVersion = if (ideVersionMajor.isNotEmpty()) {
+    val mapped = providers.gradleProperty("ide.$ideVersionMajor.platformVersion").orNull
+    require(!mapped.isNullOrBlank()) {
+        "No platform version mapping found for IDE version $ideVersionMajor. " +
+                "Add ide.$ideVersionMajor.platformVersion to gradle.properties."
+    }
+    mapped
+} else {
+    providers.gradleProperty("platformVersion").get()
+}
+
 // Compute version: base version + optional IDE suffix (e.g., "0.2.0-251")
 val baseVersion = providers.gradleProperty("pluginVersion").get()
 version = if (resolvedIdeSuffix.isNotEmpty()) "$baseVersion-$resolvedIdeSuffix" else baseVersion
@@ -71,8 +83,7 @@ dependencies {
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
-        val platformVersion = providers.gradleProperty("platformVersion")
-        intellijIdea(platformVersion) {
+        intellijIdea(resolvedPlatformVersion) {
             useInstaller = false
         }
         jetbrainsRuntime()

@@ -1,6 +1,6 @@
-# GitHub Actions Workflow that dispatches release jobs to all branches
-# Triggered when a release is published, this workflow determines all release branches
-# and triggers the actual release workflow for each branch (release/latest + all release/*)
+# GitHub Actions Workflow that dispatches release jobs for all IDE versions
+# Triggered when a release is published, this workflow reads the IDE version map
+# from gradle.properties and triggers the release workflow for each version + the open-ended (latest) release
 
 name: Release Dispatcher
 on:
@@ -15,13 +15,13 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      branches: ${{ steps.branches.outputs.matrix }}
+      ide_versions: ${{ steps.versions.outputs.matrix }}
     steps:
       # Check out the current repository
       - name: Fetch Sources
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          ref: release/latest
 
       # Set up the Java environment for changelog updates
       - name: Setup Java
@@ -74,24 +74,34 @@ jobs:
             --label "$LABEL" \
             --head $BRANCH
 
-      # Get all release branches
-      - name: Get Release Branches
-        id: branches
+      # Extract IDE major versions from the ide.*.platformVersion entries in gradle.properties
+      - name: Get IDE Versions
+        id: versions
         run: |
-          # Get all release/* branches (including release/latest)
-          BRANCHES=$(git branch -r | grep -E 'origin/release/' | sed 's/.*origin\///' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "matrix=$BRANCHES" >> $GITHUB_OUTPUT
+          VERSIONS=$(grep -oP '^ide\.\K[0-9]+(?=\.platformVersion)' gradle.properties | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "IDE versions: $VERSIONS"
+          echo "matrix=$VERSIONS" >> $GITHUB_OUTPUT
 
-  release:
-    name: Release (${{ matrix.branch }})
+  # Release for the open-ended (latest) version — no IDE version major set
+  release-latest:
+    name: Release (latest)
     needs: dispatch
-    if: needs.dispatch.outputs.branches != '[]'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ github.event.release.tag_name }}
+    secrets: inherit
+
+  # Release for each IDE-specific version
+  release-ide:
+    name: Release (IDE ${{ matrix.ide_version }})
+    needs: dispatch
+    if: needs.dispatch.outputs.ide_versions != '[]'
     strategy:
       matrix:
-        branch: ${{ fromJson(needs.dispatch.outputs.branches) }}
+        ide_version: ${{ fromJson(needs.dispatch.outputs.ide_versions) }}
       fail-fast: false
     uses: ./.github/workflows/release.yml
     with:
-      branch: ${{ matrix.branch }}
+      ide_version_major: ${{ matrix.ide_version }}
       tag: ${{ github.event.release.tag_name }}
     secrets: inherit
