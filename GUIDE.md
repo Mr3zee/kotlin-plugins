@@ -281,6 +281,10 @@ You can manually control KEFS using the <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A
       `$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`) for the current IDE's Kotlin version.
       This will force KEFS to re-download
       all plugins.
+* **KEFS: Copy Kotlin IDE Version:**
+    * **What it does:** Copies the Kotlin compiler version used by your IDE to the clipboard and shows
+      a confirmation notification. This is useful for plugin authors who need to know the exact Kotlin
+      compiler version to compile against (see [Developer Guide](PLUGIN_AUTHORS.md)).
 
 ---
 

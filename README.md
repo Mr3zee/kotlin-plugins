@@ -98,6 +98,7 @@ Quickly manage the plugin's state from the `Find Action` (Ctrl/Cmd+Shift+A) menu
 * **Update Plugins:** Forces a check for new plugin versions in your repositories.
 * **Refresh Plugins:** Clears the in-memory state and re-runs resolution.
 * **Clear Caches:** Deletes all downloaded plugin jars from the disk cache.
+* **Copy Kotlin IDE Version:** Copies the IDE's internal Kotlin compiler version to the clipboard.
 
 ## Support
 

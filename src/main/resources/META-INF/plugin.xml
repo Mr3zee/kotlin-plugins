@@ -110,5 +110,10 @@
                 class="com.github.mr3zee.kotlinPlugins.KotlinPluginsToggleExtendedDebounceAction"
         >
         </action>
+        <action
+                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsCopyKotlinIdeVersionAction"
+                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsCopyKotlinIdeVersionAction"
+        >
+        </action>
     </actions>
 </idea-plugin>

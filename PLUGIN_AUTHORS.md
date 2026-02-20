@@ -80,9 +80,13 @@ See also: details about [Version Matching](GUIDE.md#version-matching) strategies
 KEFS defines compatibility by the `<kotlin-version>` part in the artifact version.
 It must match the version of the Kotlin compiler inside a user's current IDE.
 
-Figuring out the exact version of the Kotlin compiler inside a user's IDE 
+Figuring out the exact version of the Kotlin compiler inside a user's IDE
 is [not trivial](#21-kotlin-compiler-version-location).
 And it must be done before publication.
+
+> **Tip:** You can quickly get the Kotlin compiler version of your current IDE by running the
+> **"KEFS: Copy Kotlin IDE Version"** action from <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A).
+> It copies the version string to your clipboard.
 
 These Kotlin versions are published to this repository: https://packages.jetbrains.team/maven/p/ij/intellij-dependencies
 

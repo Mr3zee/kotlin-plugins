@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `KEFS: Copy Kotlin IDE Version` action — copies the IDE's internal Kotlin compiler version to the clipboard
+
 ## [0.2.0] - 2026-01-14
 
 ### Added

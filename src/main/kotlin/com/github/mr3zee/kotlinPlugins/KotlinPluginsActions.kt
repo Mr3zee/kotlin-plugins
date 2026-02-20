@@ -6,8 +6,12 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.components.service
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.ui.dsl.builder.panel
+import java.awt.datatransfer.StringSelection
 import javax.swing.JComponent
 
 internal open class KotlinPluginsClearCachesAction : AnAction() {
@@ -60,6 +64,31 @@ internal open class KotlinPluginsUpdateAction : AnAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<KotlinPluginsStorage>()?.runActualization()
+    }
+}
+
+internal open class KotlinPluginsCopyKotlinIdeVersionAction : AnAction() {
+    init {
+        templatePresentation.icon = AllIcons.Actions.Copy
+    }
+
+    override fun getActionUpdateThread(): ActionUpdateThread {
+        return ActionUpdateThread.BGT
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val version = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        CopyPasteManager.getInstance().setContents(StringSelection(version))
+
+        e.project?.let { project ->
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup("kotlin.external.fir.support")
+                .createNotification(
+                    content = KotlinPluginsBundle.message("action.copyKotlinIdeVersion.notification", version),
+                    type = NotificationType.INFORMATION,
+                )
+                .notify(project)
+        }
     }
 }
 
