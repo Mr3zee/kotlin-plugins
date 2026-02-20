@@ -268,15 +268,15 @@ You can manually control KEFS using the <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A
 
 ![actions.png](.github/pics/actions.png)
 
-* **Kotlin FIR External Support: Update Plugins:**
+* **KEFS: Update Plugins:**
     * **What it does:** Immediately triggers the "Actualization" process for all plugins. This is
       useful if you just published a new version to a remote repository and want the IDE to pick it up without waiting
       for the 2-minute cycle.
-* **Kotlin FIR External Support: Refresh Plugins:**
+* **KEFS: Refresh Plugins:**
     * **What it does:** Clears the entire in-memory state of all plugins and re-runs the entire resolution
       and indexing process from scratch. This is a heavier action, useful if the plugin's state seems
       corrupt. It does not affect the local disk cache and preserves detected exceptions.
-* **Kotlin FIR External Support: Clear Caches:**
+* **KEFS: Clear Caches:**
     * **What it does:** Deletes all downloaded plugin jars from the local disk cache (
       `$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`) for the current IDE's Kotlin version.
       This will force KEFS to re-download
@@ -381,19 +381,19 @@ java.lang.ClassNotFoundException: <ClassName of one of the plugins KEFS detected
 
 1. **Refresh Plugins**
    
-   Use <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A) and run **"Kotlin FIR External Support: Refresh Plugins"**.
+   Use <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A) and run **"KEFS: Refresh Plugins"**.
    
    This clears the in-memory state and re-runs the entire resolution process. It's a lightweight action that doesn't affect your disk cache but can fix synchronization issues between KEFS and the IDE's Kotlin plugin.
 
 2. **Clear Caches**
    
-   If refreshing doesn't help, use <kbd>Find Action</kbd> and run **"Kotlin FIR External Support: Clear Caches"**.
+   If refreshing doesn't help, use <kbd>Find Action</kbd> and run **"KEFS: Clear Caches"**.
    
    This deletes all downloaded plugin jars from your local disk cache (`$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`), forcing KEFS to re-download and re-index all plugins from scratch. This can fix corrupted or incomplete downloads.
 
 3. **Enable Extended Invalidation Delay**
    
-   Use <kbd>Find Action</kbd> and run **"Kotlin FIR External Support: Extended Invalidation Delay"**.
+   Use <kbd>Find Action</kbd> and run **"KEFS: Extended Invalidation Delay"**.
    
    This is an internal workaround for known issues on the IDE side.
 

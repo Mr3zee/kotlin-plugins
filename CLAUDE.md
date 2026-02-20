@@ -99,6 +99,17 @@ The plugin supports multiple IntelliJ platform versions. `VersionSpecificApi` de
 - `src/main/resources/defaults.xml`: bundled default repositories and plugin descriptors
 - `src/main/resources/META-INF/plugin.xml`: extension points, actions, and service declarations
 
+## Documentation
+
+All user-facing doc files must be kept in sync when making changes to actions, settings, features, or naming:
+
+- `README.md`: plugin overview, feature descriptions, installation instructions
+- `CHANGELOG.md`: release history and change descriptions
+- `GUIDE.md`: advanced usage guide with action names, settings, troubleshooting steps
+- `PLUGIN_AUTHORS.md`: developer guide for compiler plugin authors integrating with KEFS
+
+Source of truth for action text: `src/main/resources/messages/KotlinPluginsBundle.properties`
+
 ## Code Conventions
 
 - All production source is under `com.github.mr3zee.kotlinPlugins` package

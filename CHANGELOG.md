@@ -39,9 +39,9 @@
   `.idea/kotlin-plugins.xml` file.
 - **User Actions:** Added three new actions available from the "Find Action" (Ctrl/Cmd+Shift+A)
   menu:
-    * `Kotlin FIR External Support: Update Plugins`
-    * `Kotlin FIR External Support: Refresh Plugins`
-    * `Kotlin FIR External Support: Clear Caches`
+    * `KEFS: Update Plugins`
+    * `KEFS: Refresh Plugins`
+    * `KEFS: Clear Caches`
 - **Project Sync Hook:** KEFS now hooks into project reloads (like a Gradle sync) to clear its state and
   adapt to configuration changes.
 - **Runtime Exception Tracking:** Added a new feature to analyze all exceptions reported to the IDE's root
@@ -94,7 +94,7 @@
 
 ### Added
 
-- `Clear 'Kotlin FIR External Support' Cache` IDE Action
+- `Clear 'KEFS' Cache` IDE Action
 - 251 IDE Versions Support
 
 ### Fixed
