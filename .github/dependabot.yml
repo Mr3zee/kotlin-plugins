@@ -9,7 +9,7 @@ updates:
     schedule:
       interval: "daily"
     groups:
-      all-dependencies:
+      gradle-dependencies:
         patterns:
           - "*"
   # Maintain dependencies for GitHub Actions
@@ -18,6 +18,6 @@ updates:
     schedule:
       interval: "daily"
     groups:
-      all-dependencies:
+      github-actions-dependencies:
         patterns:
           - "*"
