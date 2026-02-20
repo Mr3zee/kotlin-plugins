@@ -155,12 +155,12 @@ By combining **Local Repositories** and **File Watching**, you can create a "hot
 1. **In your compiler plugin project:** Set up your build script to publish your plugin artifacts to a local directory (
    e.g., `build/repo`).
 2. **In KEFS Settings:**
-    * Go to <kbd>Tools</kbd> > <kbd>Kotlin Plugins</kbd> > <kbd>Artifacts</kbd>.
+    * Go to <kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd> > <kbd>Artifacts</kbd>.
     * Add a new **Maven Repository**.
     * Select `Local (File path)`.
     * Set the `Path` to your plugin's local output directory (e.g.,
       `/path/to/your-plugin/build/repo`).
-    * Go to your **Kotlin Plugins** settings and add a new plugin bundle.
+    * Go to your **KEFS** settings and add a new plugin bundle.
     * Ensure your plugin bundle is configured with the correct coordinates and that it is linked to the new local
       repository you just added.
     * When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project.

@@ -18,7 +18,7 @@ Plugin ID: `com.github.mr3zee.kotlinPlugins`
 ./gradlew check
 
 # Run a single test (JUnit 4)
-./gradlew test --tests "com.github.mr3zee.kotlinPlugins.MyPluginTest.testVersionComparison"
+./gradlew test --tests "com.github.mr3zee.kefs.MyPluginTest.testVersionComparison"
 
 # Run the plugin in a sandbox IDE instance (K2 mode enabled)
 ./gradlew runIde --stacktrace
@@ -36,26 +36,26 @@ Requires **JDK 21** (configured via Gradle toolchain). Uses **Gradle 9.2.0** wit
 
 ### Core Flow
 
-1. **`KotlinPluginsProvider`** implements `KotlinBundledFirCompilerPluginProvider` — the entry point called by the Kotlin IDE plugin when it needs a compiler plugin JAR. It matches requested JARs against configured plugin descriptors (via path/artifact-id matching or custom replacement patterns) and delegates to `KotlinPluginsStorage`.
+1. **`KefsProvider`** implements `KotlinBundledFirCompilerPluginProvider` — the entry point called by the Kotlin IDE plugin when it needs a compiler plugin JAR. It matches requested JARs against configured plugin descriptors (via path/artifact-id matching or custom replacement patterns) and delegates to `KefsStorage`.
 
-2. **`KotlinPluginsStorage`** (project-level service) manages the full plugin lifecycle:
+2. **`KefsStorage`** (project-level service) manages the full plugin lifecycle:
    - In-memory cache (`pluginsCache`) maps plugin names → artifact keys → `ArtifactState`
    - Lifecycle cache prevents redundant lookups within a single IDE analysis pass
-   - Orchestrates JAR resolution: checks disk cache first, then triggers `KotlinPluginsJarLocator`
+   - Orchestrates JAR resolution: checks disk cache first, then triggers `KefsJarLocator`
    - Runs file watchers (via `WatchService`) on both cached and original (local repo) JAR directories for hot-reload
    - Handles cache invalidation with a debounce mechanism (workaround for KTIJ-37664)
    - Manages periodic auto-update via configurable interval
 
-3. **`KotlinPluginsJarLocator`** handles artifact resolution:
+3. **`KefsJarLocator`** handles artifact resolution:
    - Fetches Maven `maven-metadata.xml` from remote URLs or local paths
    - Applies version matching (Exact/Same Major/Latest) across artifact bundles
    - Downloads JARs with checksum verification (MD5)
    - Supports `for-ide` classifier fallback
    - Local repository JARs are copied and symlinked for change tracking
 
-4. **`KotlinPluginsSettings`** (persistent project-level service, stored in `.idea/kotlin-plugins.xml`) holds repositories and plugin descriptors. Default state is loaded from `defaults.xml` via `KotlinPluginsDefaultStateLoader`.
+4. **`KefsSettings`** (persistent project-level service, stored in `.idea/kotlin-plugins.xml`) holds repositories and plugin descriptors. Default state is loaded from `defaults.xml` via `KefsDefaultStateLoader`.
 
-5. **`KotlinPluginsExceptionAnalyzerService`** monitors IDE exceptions and matches stack traces against loaded plugin classes (analyzed by `KotlinPluginsJarAnalyzer`) to identify which plugin caused a crash.
+5. **`KefsExceptionAnalyzerService`** monitors IDE exceptions and matches stack traces against loaded plugin classes (analyzed by `KefsJarAnalyzer`) to identify which plugin caused a crash.
 
 ### Requested, Resolved, and Kotlin versions
 'Version' word of an artifact can relate to different things.
@@ -71,7 +71,7 @@ Here `2.2.0-ij251-78` is the Kotlin version and `0.10.2` is the Library version.
 
 Library version can be requested or resolved:
 - Requested – the version that comes from `KotlinBundledFirCompilerPluginProvider`
-- Resolved – the version found by `KotlinPluginsJarLocator` using the version matching strategy.
+- Resolved – the version found by `KefsJarLocator` using the version matching strategy.
 
 Kotlin version can be project version or IDE version:
 - Project version – the one comes from `KotlinBundledFirCompilerPluginProvider`, same place as a Requested Library version.
@@ -126,11 +126,11 @@ All user-facing doc files must be kept in sync when making changes to actions, s
 - `GUIDE.md`: advanced usage guide with action names, settings, troubleshooting steps
 - `PLUGIN_AUTHORS.md`: developer guide for compiler plugin authors integrating with KEFS
 
-Source of truth for action text: `src/main/resources/messages/KotlinPluginsBundle.properties`
+Source of truth for action text: `src/main/resources/messages/KefsBundle.properties`
 
 ## Code Conventions
 
-- All production source is under `com.github.mr3zee.kotlinPlugins` package
+- All production source is under `com.github.mr3zee.kefs` package
 - Kotlin `explicitApi()` mode is enabled — all public declarations need explicit visibility modifiers
 - Most classes are `internal`
 - Uses `kotlinx-serialization` for JSON (jar metadata) and `jsoup` for XML parsing (Maven metadata)

@@ -9,43 +9,43 @@
     <vendor>Mr3zee</vendor>
     <category>Kotlin</category>
 
-    <resource-bundle>messages.KotlinPluginsBundle</resource-bundle>
+    <resource-bundle>messages.KefsBundle</resource-bundle>
 
     <depends>org.jetbrains.kotlin</depends>
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <!--suppress PluginXmlValidity -->
-        <bundledFirCompilerPluginProvider implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsProvider"/>
+        <bundledFirCompilerPluginProvider implementation="com.github.mr3zee.kefs.KefsProvider"/>
         <supportsKotlinPluginMode supportsK1="false" supportsK2="true"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij">
         <postStartupActivity
-                implementation="com.github.mr3zee.kotlinPlugins.ExternalSystemReloadBridgeActivity"/>
+                implementation="com.github.mr3zee.kefs.ExternalSystemReloadBridgeActivity"/>
 
         <projectConfigurable
-                id="com.github.mr3zee.kotlinPlugins.settings"
+                id="com.github.mr3zee.kefs.settings"
                 parentId="tools"
                 key="configurable.displayName"
-                instance="com.github.mr3zee.kotlinPlugins.KotlinPluginsConfigurable"
+                instance="com.github.mr3zee.kefs.KefsConfigurable"
                 nonDefaultProject="false"
         />
 
         <toolWindow
-                id="com.github.mr3zee.kotlinPlugins.toolWindow"
+                id="com.github.mr3zee.kefs.toolWindow"
                 anchor="bottom"
                 icon="/icons/tool_window.svg"
-                factoryClass="com.github.mr3zee.kotlinPlugins.KotlinPluginsToolWindowFactory"
+                factoryClass="com.github.mr3zee.kefs.KefsToolWindowFactory"
         />
 
         <projectService
-                serviceInterface="com.github.mr3zee.kotlinPlugins.KotlinPluginsExceptionReporter"
-                serviceImplementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsExceptionReporterImpl"
+                serviceInterface="com.github.mr3zee.kefs.KefsExceptionReporter"
+                serviceImplementation="com.github.mr3zee.kefs.KefsExceptionReporterImpl"
         />
 
         <editorNotificationProvider
-                implementation="com.github.mr3zee.kotlinPlugins.KotlinPluginsEditorNotificationProvider"
+                implementation="com.github.mr3zee.kefs.KefsEditorNotificationProvider"
         />
 
         <notificationGroup id="kotlin.external.fir.support"
@@ -91,28 +91,28 @@
 
     <actions>
         <action
-                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCachesAction"
-                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsClearCachesAction"
+                id="com.github.mr3zee.kefs.KefsClearCachesAction"
+                class="com.github.mr3zee.kefs.KefsClearCachesAction"
         >
         </action>
         <action
-                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsRefreshAction"
-                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsRefreshAction"
+                id="com.github.mr3zee.kefs.KefsRefreshAction"
+                class="com.github.mr3zee.kefs.KefsRefreshAction"
         >
         </action>
         <action
-                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsUpdateAction"
-                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsUpdateAction"
+                id="com.github.mr3zee.kefs.KefsUpdateAction"
+                class="com.github.mr3zee.kefs.KefsUpdateAction"
         >
         </action>
         <action
-                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsToggleExtendedDebounceAction"
-                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsToggleExtendedDebounceAction"
+                id="com.github.mr3zee.kefs.KefsToggleExtendedDebounceAction"
+                class="com.github.mr3zee.kefs.KefsToggleExtendedDebounceAction"
         >
         </action>
         <action
-                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsCopyKotlinIdeVersionAction"
-                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsCopyKotlinIdeVersionAction"
+                id="com.github.mr3zee.kefs.KefsCopyKotlinIdeVersionAction"
+                class="com.github.mr3zee.kefs.KefsCopyKotlinIdeVersionAction"
         >
         </action>
     </actions>

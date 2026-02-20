@@ -8,6 +8,13 @@
 
 - `KEFS: Copy Kotlin IDE Version` action — copies the IDE's internal Kotlin compiler version to the clipboard
 
+### Changed
+
+- Renamed local disk cache directory from `$USER_HOME/.kotlinPlugins` to `$USER_HOME/.kefs`
+- Renamed action prefix from `Kotlin FIR External Support:` to `KEFS:`
+- Renamed settings page from `Tools > Kotlin Plugins` to `Tools > Kotlin External FIR Support`
+- Renamed diagnostics tool window from `Kotlin Plugins Diagnostics` to `KEFS Diagnostics`
+
 ## [0.2.0] - 2026-01-14
 
 ### Added
@@ -43,14 +50,14 @@
   `.idea/kotlin-plugins.xml` file.
 - **User Actions:** Added three new actions available from the "Find Action" (Ctrl/Cmd+Shift+A)
   menu:
-    * `KEFS: Update Plugins`
-    * `KEFS: Refresh Plugins`
-    * `KEFS: Clear Caches`
+    * `Kotlin FIR External Support: Update Plugins`
+    * `Kotlin FIR External Support: Refresh Plugins`
+    * `Kotlin FIR External Support: Clear Caches`
 - **Project Sync Hook:** KEFS now hooks into project reloads (like a Gradle sync) to clear its state and
   adapt to configuration changes.
 - **Runtime Exception Tracking:** Added a new feature to analyze all exceptions reported to the IDE's root
   logger.
-- **Fault Detection:** KEFS analyzes the class FQ names of all loaded plugin jars. 
+- **Fault Detection:** KEFS analyzes the class FQ names of all loaded plugin jars.
   If an exception's stack trace matches a class from a known plugin, KEFS identifies that plugin as the source of the
   failure.
 - **Editor Banner Notification:** When a plugin throws an exception, a banner now appears at the top of the
@@ -98,7 +105,7 @@
 
 ### Added
 
-- `Clear 'KEFS' Cache` IDE Action
+- `Clear 'Kotlin FIR External Support' Cache` IDE Action
 - 251 IDE Versions Support
 
 ### Fixed

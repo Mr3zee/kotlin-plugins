@@ -19,4 +19,4 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-rootProject.name = "Kotlin Plugins"
+rootProject.name = "Kotlin External FIR Support"

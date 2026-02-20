@@ -41,7 +41,7 @@ It can also monitor the IDE for any exceptions thrown by the plugin.
 
 ## 1. Configuring Plugins (Settings)
 
-All configuration is managed under <kbd>Tools</kbd> > <kbd>Kotlin Plugins</kbd>.
+All configuration is managed under <kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd>.
 
 ### General Settings
 
@@ -92,7 +92,7 @@ Editing the default repository:
 
 ![settings_artifacts_repo_edit_default.png](.github/pics/settings_artifacts_repo_edit_default.png)
 
-**Kotlin Plugins**
+**Kotlin Compiler Plugins**
 This section defines the "bundles" for each compiler plugin. A bundle can consist of one or more artifacts
 that work together.
 
@@ -200,7 +200,7 @@ See more versions how-to's in the [Developer guide](PLUGIN_AUTHORS.md).
 
 ## 2. Diagnosing Plugin State (Tool Window)
 
-The <kbd>Kotlin Plugins Diagnostics</kbd> tool window is your primary view into what KEFS is doing. It shows the
+The <kbd>KEFS Diagnostics</kbd> tool window is your primary view into what KEFS is doing. It shows the
 real-time status of all configured plugin bundles and their artifacts.
 
 The UI is split into a tree view of plugins on the left and a details panel on the right.
@@ -278,7 +278,7 @@ You can manually control KEFS using the <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A
       corrupt. It does not affect the local disk cache and preserves detected exceptions.
 * **KEFS: Clear Caches:**
     * **What it does:** Deletes all downloaded plugin jars from the local disk cache (
-      `$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`) for the current IDE's Kotlin version.
+      `$USER_HOME/.kefs/<kotlin-ide-version>`) for the current IDE's Kotlin version.
       This will force KEFS to re-download
       all plugins.
 * **KEFS: Copy Kotlin IDE Version:**
@@ -296,12 +296,12 @@ you can create a "hot-reload" workflow.
 1. **In your compiler plugin project:** Set up your build script to publish your plugin artifacts to a local directory (
    e.g., `build/repo`).
 2. **In KEFS Settings:**
-    * Go to <kbd>Tools</kbd> > <kbd>Kotlin Plugins</kbd> > <kbd>Artifacts</kbd>.
+    * Go to <kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd> > <kbd>Artifacts</kbd>.
     * Add a new **Maven Repository**.
     * Select `Local (File path)`.
     * Set the `Path` to your plugin's local output directory (e.g.,
       `/path/to/your-plugin/build/repo`).
-    * Go to your **Kotlin Plugins** settings and add a new plugin bundle.
+    * Go to your **KEFS** settings and add a new plugin bundle.
     * Ensure your plugin bundle is configured with the correct coordinates and that it is linked to the new local
       repository you just added.
     * When done and saved the settings, `.idea/kotlin-plugins.xml` will be created in your project.
@@ -393,7 +393,7 @@ java.lang.ClassNotFoundException: <ClassName of one of the plugins KEFS detected
    
    If refreshing doesn't help, use <kbd>Find Action</kbd> and run **"KEFS: Clear Caches"**.
    
-   This deletes all downloaded plugin jars from your local disk cache (`$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`), forcing KEFS to re-download and re-index all plugins from scratch. This can fix corrupted or incomplete downloads.
+   This deletes all downloaded plugin jars from your local disk cache (`$USER_HOME/.kefs/<kotlin-ide-version>`), forcing KEFS to re-download and re-index all plugins from scratch. This can fix corrupted or incomplete downloads.
 
 3. **Enable Extended Invalidation Delay**
    
@@ -405,7 +405,7 @@ java.lang.ClassNotFoundException: <ClassName of one of the plugins KEFS detected
 
 If none of the above solutions work, or if the issue is annoying or reproducible, please [report an issue](https://github.com/Mr3zee/kotlin-plugins/issues) on our GitHub repository. When reporting, please include:
 
-- Your IDE version and Kotlin plugin version (shown in <kbd>Tools</kbd> > <kbd>Kotlin Plugins</kbd> settings)
+- Your IDE version and Kotlin plugin version (shown in <kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd> settings)
 - The full error message or stack trace (if any)
 - Screenshots of your KEFS Diagnostics Tool Window
 - Steps to reproduce the issue

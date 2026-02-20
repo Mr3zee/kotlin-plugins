@@ -76,14 +76,14 @@ When a failure is detected, KEFS provides immediate, actionable solutions:
 
 KEFS provides a full suite of UI tools to give you complete visibility and control over your compiler plugins.
 
-* **"Kotlin Plugins Diagnostics" Tool Window:** A dedicated window that shows you every detected plugin and
+* **"KEFS Diagnostics" Tool Window:** A dedicated window that shows you every detected plugin and
   its status.
     * See which plugins were successfully loaded, which failed (e.g., `Failed To Fetch`, `Not Found`), and
       which haven't been requested yet.
     * Inspect detailed error messages for fetch/resolution failures.
     * View detailed reports for runtime exceptions, including stack traces, to help debug plugin
       failures.
-* **Settings Page (<kbd>Tools</kbd> > <kbd>Kotlin Plugins</kbd>):** A new settings panel to manage all plugin
+* **Settings Page (<kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd>):** A new settings panel to manage all plugin
   behavior.
     * **Artifacts:** Configure your plugin "bundles" (e.g. if a plugin consists of multiple jars), set
       their version-matching strategy, and assign them to specific repositories, or use the default.
