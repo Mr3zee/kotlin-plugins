@@ -4,22 +4,22 @@ KEFS is a powerful tool for *developing* compiler plugins too.
 
 ## 0. Why would need it?
 
-Core problem is explained [here](GUIDE.md#0-problem-statement), here is tldr for plugin developers:
+The core problem is explained [here](GUIDE.md#0-problem-statement), here is tldr for plugin developers:
 
 Compiler API is not stable. This means that your plugin compiled with 2.0.0 Kotlin probably will
 not work with Kotlin 2.2.20 due to binary incompatible changes.
 When running a regular build, for example, this will result in a build failure, 
-with a error which may be confusing for a user.
+with an error which may be confusing for a user.
 
 Here is the fun part:
 IDE runs a Kotlin complier under the hood to provide syntax highlighting, auto-completions.
 It **can** also render symbols and diagnostics created by a compiler plugin.
-This makes the IDE DX much better - no red code, no error only on build, etc.
+This makes the IDE DX much better – no red code, no error only on build, etc.
 If your plugin generated user-facing code or/and diagnostics - you want that to work properly.
 
 Now the catch and the reason there is this guide:
 
-\- What version of Kotlin complier does IDE run?
+\- What version of Kotlin complier does the IDE run?
 \- It's [complicated](#21-kotlin-compiler-version-location)
 
 \- How do I know it is compatible?
@@ -28,11 +28,11 @@ Now the catch and the reason there is this guide:
 \- Is it even possible and do I really need it?
 \- **That's easy!** Yes and yes! You want your users to have good DX,
 that's why you created a compiler plugin in the first place! 
-Red code and broken diagnostics in IDE is not good DX.
-KEFS and the guide below will help you make your users happy\*.
+Red code and broken diagnostics in IDE are not good DX.
+The KEFS plugin and the guide below will help you make your users happy\*.
 
 \* It's still not easy to do and maintain. 
-We are thinking on how we can make process easier for plugin authors. 
+We are thinking on how we can make the process easier for plugin authors. 
 KEFS is the first step.
 
 ## 1. Plugin Development
@@ -152,8 +152,7 @@ Some public solution for this problem may come later (though, this is not guaran
 KEFS is a powerful tool for *developing* compiler plugins too. 
 By combining **Local Repositories** and **File Watching**, you can create a "hot-reload" workflow.
 
-1. **In your compiler plugin project:** Set up your build script to publish your plugin artifacts to a local directory (
-   e.g., `build/repo`).
+1. **In your compiler plugin project:** Set up your build script to publish your plugin artifacts to a local directory (e.g., `build/repo`).
 2. **In KEFS Settings:**
     * Go to <kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd> > <kbd>Artifacts</kbd>.
     * Add a new **Maven Repository**.
@@ -177,7 +176,7 @@ Your changes to the plugin will be reflected in the IDE's analysis and diagnosti
 needing to restart the IDE.
 
 ## 4. Replacement patterns
-If you develop your plugin and want to use KEFS in the same repo you might encounter a problem:
+If you develop your plugin and want to use KEFS in the same repo, you might encounter a problem:
 
 When the plugin is loaded in the project – it is using the path the jar in `build` directory.
 But it is not a valid Maven repository path, so KEFS will miss it on request.

@@ -4,7 +4,7 @@
     <!--suppress PluginXmlValidity -->
     <name>Kotlin External FIR Support</name>
     <description>
-        Provides support for external FIR based Kotlin compiler plugins.
+        Provides support for external FIR-based Kotlin compiler plugins.
     </description>
     <vendor>Mr3zee</vendor>
     <category>Kotlin</category>
@@ -48,6 +48,7 @@
                 implementation="com.github.mr3zee.kefs.KefsEditorNotificationProvider"
         />
 
+        <!--suppress PluginXmlCapitalization -->
         <notificationGroup id="kotlin.external.fir.support"
                            displayType="BALLOON"
                            key="notification.group.displayName"/>

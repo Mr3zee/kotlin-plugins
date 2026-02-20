@@ -58,7 +58,8 @@ internal object KefsJarAnalyzer {
                     continue
                 }
 
-                if (base.contains("special\$\$inlined")) {
+                @Suppress("CanConvertToMultiDollarString")
+                if (base.contains("special$\$inlined")) {
                     continue
                 }
 

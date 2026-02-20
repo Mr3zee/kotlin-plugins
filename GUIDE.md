@@ -207,7 +207,7 @@ The UI is split into a tree view of plugins on the left and a details panel on t
 
 ### Plugin Statuses
 
-* **Successfully Loaded:** The plugin, all its artifacts versions were found and
+* **Successfully Loaded:** The plugin, all its artifact versions were found and
   loaded successfully. The details pane will show information about the loaded jar and a link to its cache
   location.
   ![tools_success.png](.github/pics/tools_success.png)
@@ -293,8 +293,7 @@ You can manually control KEFS using the <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A
 KEFS is a powerful tool for *developing* compiler plugins. By combining **Local Repositories** and **File Watching**,
 you can create a "hot-reload" workflow.
 
-1. **In your compiler plugin project:** Set up your build script to publish your plugin artifacts to a local directory (
-   e.g., `build/repo`).
+1. **In your compiler plugin project:** Set up your build script to publish your plugin artifacts to a local directory (e.g., `build/repo`).
 2. **In KEFS Settings:**
     * Go to <kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd> > <kbd>Artifacts</kbd>.
     * Add a new **Maven Repository**.

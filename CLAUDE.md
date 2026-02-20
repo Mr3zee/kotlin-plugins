@@ -59,7 +59,7 @@ Requires **JDK 21** (configured via Gradle toolchain). Uses **Gradle 9.2.0** wit
 
 ### Requested, Resolved, and Kotlin versions
 'Version' word of an artifact can relate to different things.
-All compiler plugins have a Kotlin and a Library version. By default artifact looks like this:
+All compiler plugins have a Kotlin and a Library version. By default, an artifact looks like this:
 ```
 <group-id>:<artifact-id>-<kotlin-version>-<lib-version>
 ```
@@ -90,7 +90,7 @@ The plugin supports multiple IntelliJ platform versions. `VersionSpecificApi` de
 
 ### Multi-Version Release
 
-`pluginIdeVersionMajor` in `gradle.properties` controls version-specific builds. When set (e.g., `251`), it auto-populates `sinceBuild`, `untilBuild`, version suffix, `platformVersion`, and Kotlin compiler version from the `ide.<major>.*` map in `gradle.properties`. The CI release dispatcher (`release-dispatcher.yml`) reads the IDE versions from this map and triggers parallel release jobs.
+`pluginIdeVersionMajor` in `gradle.properties` controls version-specific builds. When set (e.g., `251`), it autopopulates `sinceBuild`, `untilBuild`, version suffix, `platformVersion`, and Kotlin compiler version from the `ide.<major>.*` map in `gradle.properties`. The CI release dispatcher (`release-dispatcher.yml`) reads the IDE versions from this map and triggers parallel release jobs.
 
 ### Adding a New IDE Major Version
 

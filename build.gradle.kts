@@ -45,7 +45,7 @@ val resolvedSerializationVersion: String? = if (ideVersionMajor.isNotEmpty()) {
     providers.gradleProperty("ide.$ideVersionMajor.serializationVersion").orNull
 } else null
 
-// Compute version: base version + optional IDE suffix (e.g., "0.2.0-251")
+// Compute version: base version + optional IDE suffix (e.g. "0.2.0-251")
 val baseVersion = providers.gradleProperty("pluginVersion").get()
 version = if (resolvedIdeSuffix.isNotEmpty()) "$baseVersion-$resolvedIdeSuffix" else baseVersion
 
