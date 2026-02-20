@@ -228,3 +228,7 @@ In this case, you can tell KEFS to use these replacement patterns:
 Note, that is assumed that the artifact id is `compiler-plugin` in this case.
 
 Read more about how to set up replacement patterns in [KEFS Guide](GUIDE.md#6-advanced-use-case-replacement-patterns).
+
+## 5. Troubleshooting
+
+If you encounter issues while developing or testing your plugin with KEFS, refer to the [Troubleshooting](GUIDE.md#7-troubleshooting) section in the main guide.

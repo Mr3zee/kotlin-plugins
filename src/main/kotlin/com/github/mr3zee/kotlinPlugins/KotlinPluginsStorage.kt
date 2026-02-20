@@ -178,6 +178,7 @@ internal suspend fun KotlinPluginDiscoveryUpdater.discoveredSync(
 internal class KotlinPluginsStorageState : BaseState() {
     var autoUpdate by property(true)
     var updateInterval by property(20)
+    var extendedInvalidationDebounce by property(false)
 }
 
 @Service(Service.Level.PROJECT)
@@ -242,15 +243,19 @@ internal class KotlinPluginsStorage(
 
     private val lifecycleCache = ConcurrentHashMap<String, Map<String, Path>>()
 
-    private val invalidationPending = AtomicBoolean(false)
     private val lastProvideCallTimestamp = AtomicLong(0)
     private val providerCallInProgress = AtomicLong(0L)
-    private val providerDebounceJob = AtomicReference<Job?>(null)
+    private val invalidationJob = AtomicReference<Job?>(null)
 
     companion object {
         const val KOTLIN_PLUGINS_STORAGE_DIRECTORY = ".kotlinPlugins"
-        private const val INVALIDATION_DEBOUNCE_MS = 750L
+
+        private const val INVALIDATION_DEBOUNCE_BASE_MS = 750L
+        private const val INVALIDATION_DEBOUNCE_EXTENDED_MS = 2000L
     }
+
+    private val invalidationDebounceMs: Long
+        get() = if (state.extendedInvalidationDebounce) INVALIDATION_DEBOUNCE_EXTENDED_MS else INVALIDATION_DEBOUNCE_BASE_MS
 
     private val statusPublisher by lazy {
         project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC)
@@ -267,8 +272,6 @@ internal class KotlinPluginsStorage(
 
     private suspend inline fun internalClearStateNoInvalidate(and: () -> Unit = {}) {
         try {
-            invalidationPending.set(true)
-
             while (true) {
                 actualizerJobs.values.forEach { it.cancelAndJoin() }
                 if (actualizerLock.tryLock()) {
@@ -397,7 +400,7 @@ internal class KotlinPluginsStorage(
             originalWatchKeysReverse.clear()
             runCatchingExceptCancellation { watchService.close() } // can throw IOException
             fileWatcherThread.shutdown()
-            providerDebounceJob.get()?.cancel()
+            invalidationJob.get()?.cancel()
             logger.debug("Storage closed")
         }
 
@@ -843,7 +846,7 @@ internal class KotlinPluginsStorage(
 
     fun getPluginPath(requested: RequestedKotlinPluginDescriptor): Path? {
         // If invalidation is pending, return null
-        if (invalidationPending.get()) {
+        if (invalidationJob.get() != null) {
             logger.debug("Invalidation pending ${requested.descriptor.name}:${requested.artifact.id} (${requested.requestedVersion})")
             return null
         }
@@ -1262,39 +1265,44 @@ internal class KotlinPluginsStorage(
             return
         }
 
-        // Mark invalidation as pending, otherwise leave
-        if (!invalidationPending.compareAndSet(false, true)) {
-            return
-        }
-
-        // Clear the lifecycle immediately
-        lifecycleCache.clear()
-        statusPublisher.reset()
-
-        providerDebounceJob.getAndSet(null)?.cancel()
-
         // TODO: this is a workaround for KTIJ-37664 for IDE versions before 261
         //  remove when we drop support for them
-        val newJob = scope.launch(CoroutineName("provider-debounce")) {
+        val newJob = scope.launch(
+            context = CoroutineName("provider-debounce"),
+            start = CoroutineStart.LAZY,
+        ) {
             while (true) {
                 if (providerCallInProgress.get() > 0) {
-                    delay(INVALIDATION_DEBOUNCE_MS)
+                    delay(invalidationDebounceMs)
                     continue
                 }
 
                 val timeSinceLastCall = System.currentTimeMillis() - lastProvideCallTimestamp.get()
-                if (timeSinceLastCall >= INVALIDATION_DEBOUNCE_MS) {
+                if (timeSinceLastCall >= invalidationDebounceMs) {
                     break
                 }
 
-                delay(INVALIDATION_DEBOUNCE_MS - timeSinceLastCall)
+                delay(invalidationDebounceMs - timeSinceLastCall)
             }
 
             doInvalidate()
-            invalidationPending.set(false)
+        }.apply {
+            invokeOnCompletion {
+                invalidationJob.set(null)
+            }
         }
 
-        providerDebounceJob.set(newJob)
+        // Mark invalidation as pending, otherwise leave
+        if (invalidationJob.compareAndSet(null, newJob)) {
+            // Clear the lifecycle immediately
+            lifecycleCache.clear()
+            statusPublisher.reset()
+
+            newJob.start()
+            logger.debug("Invalidation job started")
+        } else {
+            logger.debug("Invalidation already pending")
+        }
     }
 
     @OptIn(KaPlatformInterface::class)
@@ -1303,7 +1311,7 @@ internal class KotlinPluginsStorage(
 
         // clear Kotlin plugin caches
         if (provider is Disposable) {
-            Disposer.dispose(provider)
+            provider.dispose()
             logger.debug("Invalidated KotlinCompilerPluginsProvider after debounce")
         } else {
             logger.warn("Failed to invalidate the KotlinCompilerPluginsProvider")

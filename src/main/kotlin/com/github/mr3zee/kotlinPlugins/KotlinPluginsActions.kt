@@ -4,6 +4,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.dsl.builder.panel
@@ -59,6 +60,23 @@ internal open class KotlinPluginsUpdateAction : AnAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<KotlinPluginsStorage>()?.runActualization()
+    }
+}
+
+internal open class KotlinPluginsToggleExtendedDebounceAction : ToggleAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread {
+        return ActionUpdateThread.BGT
+    }
+
+    override fun isSelected(e: AnActionEvent): Boolean {
+        val storage = e.project?.service<KotlinPluginsStorage>() ?: return false
+        return storage.state.extendedInvalidationDebounce
+    }
+
+    override fun setSelected(e: AnActionEvent, state: Boolean) {
+        val storage = e.project?.service<KotlinPluginsStorage>() ?: return
+        storage.state.extendedInvalidationDebounce = state
+        storage.invalidateKotlinPluginCache()
     }
 }
 

@@ -350,3 +350,60 @@ Three replacement parameters are available:
 
 These examples in UI (except version pattern uses `+` as a demonstration):
 ![replacement_example.jpg](.github/pics/replacement_example.jpg)
+
+---
+
+## 7. Troubleshooting
+
+Sometimes things don't work as expected. This section covers common issues and how to resolve them.
+
+### Plugin Appears Loaded but Doesn't Work
+
+**Symptoms:**
+- The KEFS Diagnostics Tool Window shows all plugins as successfully loaded (green status)
+- However, plugin features don't work in the editor:
+  - No custom highlighting or diagnostics from the plugin
+  - No code generation rendering
+  - IDE behaves as if the plugin isn't loaded
+
+**Or you see a `ClassNotFoundException` error:**
+```
+java.lang.ClassNotFoundException: <ClassName of one of the plugins KEFS detected>
+	at com.intellij.util.lang.UrlClassLoader.findClass(UrlClassLoader.java:259)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:593)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	at java.base/java.lang.Class.forName0(Native Method)
+	at java.base/java.lang.Class.forName(Class.java:534)
+	at java.base/java.lang.Class.forName(Class.java:513)
+```
+
+**Solutions (try in order):**
+
+1. **Refresh Plugins**
+   
+   Use <kbd>Find Action</kbd> (Ctrl/Cmd+Shift+A) and run **"Kotlin FIR External Support: Refresh Plugins"**.
+   
+   This clears the in-memory state and re-runs the entire resolution process. It's a lightweight action that doesn't affect your disk cache but can fix synchronization issues between KEFS and the IDE's Kotlin plugin.
+
+2. **Clear Caches**
+   
+   If refreshing doesn't help, use <kbd>Find Action</kbd> and run **"Kotlin FIR External Support: Clear Caches"**.
+   
+   This deletes all downloaded plugin jars from your local disk cache (`$USER_HOME/.kotlinPlugins/<kotlin-ide-version>`), forcing KEFS to re-download and re-index all plugins from scratch. This can fix corrupted or incomplete downloads.
+
+3. **Enable Extended Invalidation Delay**
+   
+   Use <kbd>Find Action</kbd> and run **"Kotlin FIR External Support: Extended Invalidation Delay"**.
+   
+   This is an internal workaround for known issues on the IDE side.
+
+### Still Having Issues?
+
+If none of the above solutions work, or if the issue is annoying or reproducible, please [report an issue](https://github.com/Mr3zee/kotlin-plugins/issues) on our GitHub repository. When reporting, please include:
+
+- Your IDE version and Kotlin plugin version (shown in <kbd>Tools</kbd> > <kbd>Kotlin Plugins</kbd> settings)
+- The full error message or stack trace (if any)
+- Screenshots of your KEFS Diagnostics Tool Window
+- Steps to reproduce the issue
+
+You can also use the built-in <kbd>Report to the 3rd Party</kbd> action when an exception occurs to send a detailed bug report directly to us.

@@ -106,5 +106,10 @@
                 class="com.github.mr3zee.kotlinPlugins.KotlinPluginsUpdateAction"
         >
         </action>
+        <action
+                id="com.github.mr3zee.kotlinPlugins.KotlinPluginsToggleExtendedDebounceAction"
+                class="com.github.mr3zee.kotlinPlugins.KotlinPluginsToggleExtendedDebounceAction"
+        >
+        </action>
     </actions>
 </idea-plugin>
