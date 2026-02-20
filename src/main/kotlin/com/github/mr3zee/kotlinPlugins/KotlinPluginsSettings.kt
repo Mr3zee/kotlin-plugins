@@ -171,7 +171,7 @@ internal data class KotlinPluginDescriptor(
     // detect: <artifactId>-<kotlin-version>-<lib-version>
     // regex: (?<artifactId>[\w-]+?)-(?<kotlin_version>\d+\.\d+\.\d+(?:[\w-]+)?)-(?<lib_version>\d+\.\d+\.\d+(?:[\w-]+)?)
     // search: kotlinx-rpc-<artifactId>-<kotlin-version>-<lib-version>
-    class Replacement(
+    data class Replacement(
         val version: String,
         val detect: String,
         val search: String,
