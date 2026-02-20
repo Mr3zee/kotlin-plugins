@@ -85,7 +85,6 @@
         <dependencySupport kind="java" coordinate="org.jetbrains.kotlinx:kotlinx-rpc-protobuf-core"
                            displayName="kotlinx-rpc: Protobuf Core"/>
 
-        <!--    TODO contact marketplace@jetbrains.com-->
         <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>
 
     </extensions>
