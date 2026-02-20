@@ -40,6 +40,11 @@ val resolvedPlatformVersion = if (ideVersionMajor.isNotEmpty()) {
     providers.gradleProperty("platformVersion").get()
 }
 
+// Resolve serialization version: look up from IDE version map, fallback to version catalog default
+val resolvedSerializationVersion: String? = if (ideVersionMajor.isNotEmpty()) {
+    providers.gradleProperty("ide.$ideVersionMajor.serializationVersion").orNull
+} else null
+
 // Compute version: base version + optional IDE suffix (e.g., "0.2.0-251")
 val baseVersion = providers.gradleProperty("pluginVersion").get()
 version = if (resolvedIdeSuffix.isNotEmpty()) "$baseVersion-$resolvedIdeSuffix" else baseVersion
@@ -71,6 +76,17 @@ repositories {
         jetbrainsRuntime()
         snapshots() // https://www.jetbrains.com/intellij-repository/snapshots
         nightly()
+    }
+}
+
+// Force dependency versions from the IDE version map when pluginIdeVersionMajor is set
+if (resolvedSerializationVersion != null) {
+    configurations.all {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-serialization")) {
+                useVersion(resolvedSerializationVersion)
+            }
+        }
     }
 }
 

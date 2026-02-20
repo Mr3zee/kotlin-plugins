@@ -92,6 +92,24 @@ The plugin supports multiple IntelliJ platform versions. `VersionSpecificApi` de
 
 `pluginIdeVersionMajor` in `gradle.properties` controls version-specific builds. When set (e.g., `251`), it auto-populates `sinceBuild`, `untilBuild`, version suffix, `platformVersion`, and Kotlin compiler version from the `ide.<major>.*` map in `gradle.properties`. The CI release dispatcher (`release-dispatcher.yml`) reads the IDE versions from this map and triggers parallel release jobs.
 
+### Adding a New IDE Major Version
+
+When adding support for a new IDE major (e.g., `262`):
+
+1. **`gradle.properties`** — add three map entries:
+   ```properties
+   ide.262.platformVersion = <full-build-number>
+   ide.262.kotlinLang = <kotlin-version>
+   ide.262.serializationVersion = <serialization-version>
+   ```
+   **Finding the platform version:** Browse the IntelliJ releases Maven repository index at `https://www.jetbrains.com/intellij-repository/releases/com/jetbrains/intellij/idea/ideaIU/maven-metadata.xml` (follows redirects) and pick the latest `<major>.xxxxx.xx` build. For EAP/snapshot versions, use `<major>-EAP-SNAPSHOT`.
+
+2. **`src/<major>/kotlin/.../VersionSpecificApiImpl.kt`** — create a new version-specific source directory implementing `VersionSpecificApi`. Copy from the nearest existing version and adapt to any API changes.
+
+3. **Update `pluginSinceBuild`/`platformVersion`** in `gradle.properties` if this becomes the new default development target.
+
+No changes needed in GitHub workflows — `release-dispatcher.yml` auto-discovers IDE versions from the `ide.*.platformVersion` entries in `gradle.properties`.
+
 ## Key Configuration
 
 - `gradle.properties`: `platformVersion` sets the default target IntelliJ version; `ide.<major>.platformVersion`/`ide.<major>.kotlinLang` map auto-resolves versions per IDE major; `pluginSinceBuild`/`pluginUntilBuild` set compatibility range

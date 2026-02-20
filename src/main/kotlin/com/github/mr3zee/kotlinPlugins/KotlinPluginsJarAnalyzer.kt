@@ -58,7 +58,7 @@ internal object KotlinPluginsJarAnalyzer {
                     continue
                 }
 
-                if (base.contains($$$"special$$inlined")) {
+                if (base.contains("special\$\$inlined")) {
                     continue
                 }
 
