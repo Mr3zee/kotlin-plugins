@@ -21,7 +21,6 @@ import com.intellij.util.messages.Topic
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.json.Json
 import org.jetbrains.kotlin.analysis.api.KaPlatformInterface
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.nio.file.Files
@@ -34,12 +33,9 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
-import kotlin.io.path.deleteIfExists
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
-import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
-import kotlin.io.path.readText
 import kotlin.time.Duration.Companion.minutes
 
 internal sealed interface ArtifactStatus {
@@ -875,91 +871,38 @@ internal class KefsStorage(
             )
         }
 
-        val (resolvedVersion, resolvedKotlinVersion, found) = findJarPath(requested, kotlinIdeVersion)
-            ?: return@withContext StoredJar(
-                mavenId = requested.artifact.id,
-                resolvedVersion = null,
-                jar = null,
+        val basePath = cacheDirectory(
+            kotlinIdeVersion = kotlinIdeVersion,
+            pluginName = requested.descriptor.name,
+            requestedVersion = requested.requestedVersion,
+        ) ?: return@withContext StoredJar(requested.artifact.id, null, null)
+
+        val scanResult = runCatchingExceptCancellation {
+            KefsDiskScanner.findMatchingJar(
+                basePath = basePath,
+                artifact = requested.artifact,
+                kotlinIdeVersion = kotlinIdeVersion,
+                replacement = requested.descriptor.replacement,
+                matchFilter = requested.asMatchFilter(),
             )
+        }.getOrNull() ?: return@withContext StoredJar(requested.artifact.id, null, null)
 
-        val checksum = runCatchingExceptCancellation { md5(found).asChecksum() }.getOrNull()
-            ?: return@withContext StoredJar(
-                mavenId = requested.artifact.id,
-                resolvedVersion = null,
-                jar = null,
-            )
+        val (resolvedVersion, resolvedKotlinVersion, found) = scanResult
 
-        val original = found.resolveOriginalJarFile()
+        val validated = KefsDiskScanner.validateCachedJar(
+            jarPath = found,
+            kotlinIdeVersion = kotlinIdeVersion,
+            resolvedKotlinVersion = resolvedKotlinVersion,
+            resolvedVersion = resolvedVersion,
+            repositories = requested.descriptor.repositories,
+        ) ?: return@withContext StoredJar(requested.artifact.id, null, null)
 
-        if (original != null && checksum != md5(original).asChecksum()) {
-            runCatchingExceptCancellation { Files.deleteIfExists(found) }
-
-            logger.debug("Checksums don't match with the original jar for ${requested.artifact.id} (${requested.requestedVersion})")
-
-            return@withContext StoredJar(
-                mavenId = requested.artifact.id,
-                resolvedVersion = null,
-                jar = null,
-            )
-        }
-
-        val kotlinVersionMismatch = if (resolvedKotlinVersion != kotlinIdeVersion) {
-            KotlinVersionMismatch(
-                ideVersion = kotlinIdeVersion,
-                jarVersion = resolvedKotlinVersion,
-            )
-        } else {
-            null
-        }
-
-        val jar = Jar(
-            path = found,
-            checksum = checksum,
-            isLocal = original != null,
-            kotlinVersionMismatch = kotlinVersionMismatch,
-        )
-
-        val metadataPath = found.resolveSibling("${found.fileName}.$METADATA_EXTENSION")
-
-        val metadata = try {
-            if (metadataPath.exists()) {
-                Json.decodeFromString<JarDiskMetadata>(metadataPath.readText())
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            logger.debug(
-                "Failed to read metadata for $found " +
-                        "(${requested.descriptor.name}, ${requested.requestedVersion}): ${e.message}"
-            )
-            null
-        }
-
-        if (metadata == null || requested.descriptor.repositories.none { it.name == metadata.originRepositoryName }) {
-            logger.debug(
-                "Invalid original repository for $found (${requested.descriptor.name}, ${requested.requestedVersion}): " +
-                        "${metadata?.originRepositoryName}. " +
-                        "Expected one of: ${requested.descriptor.repositories}"
-            )
-
-            runCatchingExceptCancellation {
-                metadataPath.deleteIfExists()
-            }
-
-            return@withContext StoredJar(
-                mavenId = requested.artifact.id,
-                resolvedVersion = null,
-                jar = null,
-            )
-        }
-
-        val origin = requested.descriptor.repositories.single { it.name == metadata.originRepositoryName }
         val newState = ArtifactState.Cached(
-            jar = jar,
+            jar = validated.jar,
             requestedVersion = requested.requestedVersion,
             resolvedVersion = resolvedVersion,
             criteria = requested.descriptor.versionMatching,
-            origin = origin,
+            origin = validated.origin,
         )
 
         pluginMap[requestedPlugin] = newState
@@ -969,68 +912,19 @@ internal class KefsStorage(
             mavenId = requested.artifact.id,
             resolvedVersion = resolvedVersion,
             requestedVersion = requested.requestedVersion,
-            origin = origin,
-            jar = jar.path,
-            checksum = checksum,
-            isLocal = jar.isLocal,
-            kotlinVersionMismatch = kotlinVersionMismatch,
+            origin = validated.origin,
+            jar = validated.jar.path,
+            checksum = validated.jar.checksum,
+            isLocal = validated.jar.isLocal,
+            kotlinVersionMismatch = validated.jar.kotlinVersionMismatch,
         )
 
         StoredJar(
             mavenId = requested.artifact.id,
             resolvedVersion = resolvedVersion,
-            jar = jar,
+            jar = validated.jar,
         )
     }
-
-    private suspend fun findJarPath(
-        requested: RequestedKotlinPluginDescriptor,
-        kotlinIdeVersion: String,
-    ): Triple<ResolvedVersion, String, Path>? = runCatchingExceptCancellation {
-        val basePath = cacheDirectory(
-            kotlinIdeVersion = kotlinIdeVersion,
-            pluginName = requested.descriptor.name,
-            requestedVersion = requested.requestedVersion,
-        ) ?: return null
-
-        if (!Files.exists(basePath)) {
-            return null
-        }
-
-        val replacement = requested.descriptor.replacement
-        val artifactsPattern = if (replacement != null) {
-            val artifactString = replacement.getArtifactString(requested.artifact)
-            val versionString = replacement.getVersionString(kotlinIdeVersion, "*")
-
-            // extra * for classifiers
-            "$artifactString-$versionString*.jar"
-        } else {
-            "${requested.artifact.artifactId}-$kotlinIdeVersion-*.jar"
-        }
-
-        val candidates = basePath
-            .listDirectoryEntries(artifactsPattern)
-            .toList()
-
-        logger.debug("Candidates for ${requested.artifact.id}:${requested.requestedVersion} -> ${candidates.map { it.fileName }}")
-
-        val versionToPath = candidates
-            .associateBy {
-                it.name
-                    .substringAfter("${requested.artifact.artifactId}-$kotlinIdeVersion-")
-                    .substringBefore(".jar")
-            }
-
-        // the same version check will happen later
-        val matched = getMatching(listOf(versionToPath.keys.toList()), "", requested.asMatchFilter())
-
-        return matched?.let { resolvedVersion ->
-            val path = versionToPath.getValue(resolvedVersion.value)
-
-            // todo support fallbacks
-            Triple(resolvedVersion, kotlinIdeVersion, path)
-        }
-    }.getOrNull()
 
     @Suppress("UnstableApiUsage")
     private suspend inline fun resolveCacheDir(getApi: () -> EelApi): Path? {

@@ -460,6 +460,5 @@ internal class KefsExceptionReporterImpl(
 
     companion object {
         const val EXCEPTIONS_CACHE_SIZE = 20
-        private val NL = System.lineSeparator()
     }
 }
