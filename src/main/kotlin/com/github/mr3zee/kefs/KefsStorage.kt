@@ -12,7 +12,6 @@ import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.provider.asNioPath
@@ -25,25 +24,19 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import org.jetbrains.kotlin.analysis.api.KaPlatformInterface
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
-import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardWatchEventKinds
-import java.nio.file.WatchEvent
-import java.nio.file.WatchKey
-import java.nio.file.Watchable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.collections.forEach
 import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.Path
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
-import kotlin.io.path.isDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.io.path.readText
@@ -211,18 +204,15 @@ internal class KefsStorage(
     private var _cacheDir: CompletableDeferred<Path?> = CompletableDeferred()
     private val scope = parentScope + SupervisorJob(parentScope.coroutineContext.job)
 
-    private val watchService = FileSystems.getDefault().newWatchService()
+    internal val fileWatcher = KefsFileWatcher(object : FileWatcherCallback {
+        override fun onLocalRepoChange(repoRoot: Path) {
+            handleLocalRepoChange(repoRoot)
+        }
 
-    private val pluginWatchKeys = ConcurrentHashMap<FileWatcherPluginKey, WatchKey>()
-    private val pluginWatchKeysReverse = ConcurrentHashMap<WatchKey, FileWatcherPluginKey>()
-
-    private class WatchKeyWithChecksum(
-        val key: WatchKey,
-        val checksum: String,
-    )
-
-    private val originalWatchKeys = ConcurrentHashMap<JarId, WatchKeyWithChecksum>()
-    private val originalWatchKeysReverse = ConcurrentHashMap<WatchKey, JarId>()
+        override fun onCacheDirExternalChange() {
+            clearState()
+        }
+    })
 
     @Suppress("UnstableApiUsage")
     suspend fun cacheDir(): Path? {
@@ -294,12 +284,7 @@ internal class KefsStorage(
             pluginsCache.clear()
             lifecycleCache.clear()
 
-            pluginWatchKeys.values.forEach { it.cancel() }
-            pluginWatchKeys.clear()
-            pluginWatchKeysReverse.clear()
-            originalWatchKeys.values.forEach { it.key.cancel() }
-            originalWatchKeys.clear()
-            originalWatchKeysReverse.clear()
+            fileWatcher.cancelAllWatchKeys()
 
             and()
         } finally {
@@ -313,6 +298,7 @@ internal class KefsStorage(
             logger.debug("Clearing state")
 
             internalClearStateNoInvalidate {
+                reregisterWatchers()
                 invalidateKotlinPluginCache()
             }
         }
@@ -334,6 +320,7 @@ internal class KefsStorage(
                     }
                 }
 
+                reregisterWatchers()
                 invalidateKotlinPluginCache()
             }
         }
@@ -374,9 +361,10 @@ internal class KefsStorage(
 
         scope.launch(fileWatcherDispatcher + CoroutineName("file-watcher")) {
             try {
+                reregisterWatchers()
                 while (true) {
                     try {
-                        fileWatcherLoop()
+                        fileWatcher.processOneEvent()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -394,11 +382,7 @@ internal class KefsStorage(
             lifecycleCache.clear()
             actualizerJobs.clear()
             indexJobs.clear()
-            pluginWatchKeys.clear()
-            pluginWatchKeysReverse.clear()
-            originalWatchKeys.clear()
-            originalWatchKeysReverse.clear()
-            runCatchingExceptCancellation { watchService.close() } // can throw IOException
+            fileWatcher.close()
             fileWatcherThread.shutdown()
             invalidationJob.get()?.cancel()
             logger.debug("Storage closed")
@@ -407,122 +391,45 @@ internal class KefsStorage(
         project.service<KefsExceptionAnalyzerService>().start()
     }
 
-    private suspend fun fileWatcherLoop() {
-        val key = withContext(Dispatchers.IO) {
-            watchService.poll(1000, TimeUnit.MILLISECONDS)
-        } ?: return
+    private suspend fun reregisterWatchers() {
+        val settings = project.service<KefsSettings>().safeState()
+        val localRepoPaths = settings.repositories
+            .filter { it.type == KotlinArtifactsRepository.Type.PATH }
+            .mapNotNull { runCatching { Path(it.value).toAbsolutePath().normalize() }.getOrNull() }
+            .distinct()
 
-        if (!key.isValid) {
-            // probably a parent was removed
-            clearState()
-            return
-        }
-
-        val path = key.watchable() as? Path
-        if (path == null) {
-            key.cancel()
-            return
+        for (repoPath in localRepoPaths) {
+            fileWatcher.registerLocalRepo(repoPath)
         }
 
         val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
-        val pluginKey = pluginWatchKeysReverse[key]
-        if (pluginKey == null) {
-            // original
-            val jarId = originalWatchKeysReverse[key]
-            if (jarId == null) {
-                key.cancel()
-                originalWatchKeysReverse.remove(key)
-                return
+        val versionCacheDir = cacheDir()?.resolve(kotlinIdeVersion) ?: return
+
+        withContext(Dispatchers.IO) {
+            versionCacheDir.createDirectories()
+        }
+
+        fileWatcher.registerCacheDir(versionCacheDir)
+    }
+
+    private fun handleLocalRepoChange(repoRoot: Path) {
+        logger.debug("File watcher detected changes in local repo: $repoRoot")
+
+        val settings = project.service<KefsSettings>().safeState()
+        val matchingRepoNames = settings.repositories
+            .filter { it.type == KotlinArtifactsRepository.Type.PATH }
+            .filter { runCatching { Path(it.value).toAbsolutePath().normalize() }.getOrNull() == repoRoot }
+            .map { it.name }
+            .toSet()
+
+        if (matchingRepoNames.isNotEmpty()) {
+            val pluginsToActualize = settings.plugins.filter { plugin ->
+                plugin.enabled && plugin.repositories.any { it.name in matchingRepoNames }
             }
 
-            val plugin = project.service<KefsSettings>()
-                .pluginByName(jarId.pluginName)
-
-            if (plugin == null) {
-                key.cancel()
-                originalWatchKeysReverse.remove(key)?.let {
-                    originalWatchKeys.remove(it)
-                }
-                return
-            }
-
-            val artifactId = jarId.mavenId.substringAfter(":")
-            val detected = key.pollEvents().find { event ->
-                val context = event.context() as? Path ?: return@find false
-
-                val name = context.name
-                !context.isDirectory() &&
-                        name.contains(artifactId) &&
-                        name.contains("$kotlinIdeVersion-${jarId.resolvedVersion}") &&
-                        (name.endsWith(".jar"))
-            }
-
-            if (detected != null) {
-                logger.debug("File watcher detected a change in the original path for $jarId: ${detected.context()}")
-                scope.actualize(
-                    plugin = VersionedKotlinPluginDescriptor(plugin, jarId.requestedVersion),
-                    prevResolvedVersion = jarId.resolvedVersion,
-                )
-            }
-            key.reset()
-        } else {
-            val cacheDir = cacheDirectory(
-                kotlinIdeVersion = kotlinIdeVersion,
-                pluginName = pluginKey.pluginName,
-                requestedVersion = pluginKey.requestedVersion,
-            )
-
-            if (cacheDir == null) {
-                key.cancel()
-                pluginWatchKeysReverse.remove(key)?.let {
-                    pluginWatchKeys.remove(it)
-                }
-                return
-            }
-
-            if (path == cacheDir) {
-                val plugin = project.service<KefsSettings>()
-                    .pluginByName(pluginKey.pluginName)
-
-                if (plugin == null) {
-                    key.cancel()
-                    pluginWatchKeysReverse.remove(key)?.let {
-                        pluginWatchKeys.remove(it)
-                    }
-                    return
-                }
-
-                val detected = key.pollEvents().filter { event ->
-                    val context = event.context() as? Path ?: return@filter false
-
-                    val name = context.name
-                    !context.isDirectory() &&
-                            plugin.ids.any { name.startsWith(it.artifactId) } &&
-                            name.contains("$kotlinIdeVersion-${pluginKey.resolvedVersion}") &&
-                            (name.endsWith(".jar") || name.endsWith(".jar.link") || name.endsWith(".jar.$METADATA_EXTENSION"))
-                }
-
-                if (detected.isNotEmpty()) {
-                    logger.debug(
-                        "File watcher detected changes in the cached path for $pluginKey: ${
-                            detected.joinToString {
-                                it.context().toString()
-                            }
-                        }"
-                    )
-
-                    scope.actualize(
-                        plugin = VersionedKotlinPluginDescriptor(plugin, pluginKey.requestedVersion),
-                        prevResolvedVersion = pluginKey.resolvedVersion,
-                    )
-                }
-                key.reset()
-            } else {
-                logger.debug("Unexpected cached path and watch key path inequality: $path != $cacheDir")
-                key.cancel()
-                pluginWatchKeysReverse.remove(key)?.let {
-                    pluginWatchKeys.remove(it)
-                }
+            for (plugin in pluginsToActualize) {
+                val cached = pluginsCache[plugin.name] ?: continue
+                actualizePlugin(plugin, cached)
             }
         }
     }
@@ -533,13 +440,7 @@ internal class KefsStorage(
             val plugin = project.service<KefsSettings>().pluginByName(pluginName)
                 ?: return@forEach
 
-            artifacts.entries.groupBy { it.key.requestedVersion }.forEach { (requestedVersion, artifacts) ->
-                val prevResolvedVersion = artifacts.firstNotNullOfOrNull {
-                    (it.value as? ArtifactState.Cached)?.resolvedVersion
-                }
-
-                scope.actualize(VersionedKotlinPluginDescriptor(plugin, requestedVersion), prevResolvedVersion)
-            }
+            actualizePlugin(plugin, artifacts)
         }
     }
 
@@ -626,10 +527,16 @@ internal class KefsStorage(
         return result
     }
 
-    private fun CoroutineScope.actualize(
-        plugin: VersionedKotlinPluginDescriptor,
-        prevResolvedVersion: ResolvedVersion?,
+    private fun actualizePlugin(
+        plugin: KotlinPluginDescriptor,
+        artifacts: Map<RequestedPluginKey, ArtifactState>,
     ) {
+        artifacts.keys.distinctBy { it.requestedVersion }.forEach { key ->
+            scope.actualize(VersionedKotlinPluginDescriptor(plugin, key.requestedVersion))
+        }
+    }
+
+    private fun CoroutineScope.actualize(plugin: VersionedKotlinPluginDescriptor) {
         val descriptor = plugin.descriptor
         val currentJob = actualizerJobs[plugin]
         if (currentJob != null && currentJob.isActive) {
@@ -640,14 +547,6 @@ internal class KefsStorage(
         val anyJarChanged = AtomicBoolean(false)
 
         val nextJob = launch(context = CoroutineName("jar-fetcher-${descriptor.name}"), start = CoroutineStart.LAZY) {
-            if (prevResolvedVersion != null) {
-                val prevPluginKey = FileWatcherPluginKey(descriptor.name, plugin.requestedVersion, prevResolvedVersion)
-                pluginWatchKeys.remove(prevPluginKey)?.let {
-                    it.cancel()
-                    pluginWatchKeysReverse.remove(it)
-                }
-            }
-
             statusPublisher.updatePlugin(descriptor.name, ArtifactStatus.InProgress)
 
             val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
@@ -674,20 +573,26 @@ internal class KefsStorage(
                     k.mavenId to (v as ArtifactState.Cached).jar
                 }
 
+            fileWatcher.markSelfUpdateStart()
             val bundleResult = runCatchingExceptCancellation(
                 onCancellation = {
+                    fileWatcher.markSelfUpdateEnd()
                     statusPublisher.updatePlugin(
                         pluginName = descriptor.name,
                         status = ArtifactStatus.FailedToFetch("Job was cancelled"),
                     )
                 }
             ) {
-                KefsJarLocator.locateArtifacts(
-                    versioned = plugin,
-                    kotlinIdeVersion = kotlinIdeVersion,
-                    dest = destination,
-                    known = known,
-                )
+                try {
+                    KefsJarLocator.locateArtifacts(
+                        versioned = plugin,
+                        kotlinIdeVersion = kotlinIdeVersion,
+                        dest = destination,
+                        known = known,
+                    )
+                } finally {
+                    fileWatcher.markSelfUpdateEnd()
+                }
             }
 
             if (bundleResult.isFailure) {
@@ -708,13 +613,7 @@ internal class KefsStorage(
                 """.trimMargin()
             )
 
-            var resolvedVersion: ResolvedVersion? = null
-
             bundle.locatorResults.entries.forEach { (id, locatorResult) ->
-                if (locatorResult is LocatorResult.Cached) {
-                    resolvedVersion = locatorResult.resolvedVersion
-                }
-
                 val resolvedKey = RequestedPluginKey(id.id, plugin.requestedVersion)
 
                 var resolvedIsNew = false
@@ -726,37 +625,6 @@ internal class KefsStorage(
                     }
 
                     locatorResult.state
-                }
-
-                if (locatorResult is LocatorResult.Cached) {
-                    val original = locatorResult.original
-                    if (original != null) {
-                        val jarKey = JarId(
-                            pluginName = plugin.descriptor.name,
-                            mavenId = id.id,
-                            requestedVersion = plugin.requestedVersion,
-                            resolvedVersion = locatorResult.resolvedVersion,
-                        )
-
-                        val watchKeyWithChecksum = withContext(Dispatchers.IO) {
-                            originalWatchKeys.compute(jarKey) { _, old ->
-                                if (old?.checksum != locatorResult.state.jar.checksum) {
-                                    old?.key?.cancel()
-
-                                    original.parent?.registerSafe(
-                                        StandardWatchEventKinds.ENTRY_MODIFY,
-                                        StandardWatchEventKinds.ENTRY_CREATE,
-                                    )?.let {
-                                        WatchKeyWithChecksum(it, locatorResult.state.jar.checksum)
-                                    }
-                                } else old
-                            }
-                        }
-
-                        if (watchKeyWithChecksum != null) {
-                            originalWatchKeysReverse[watchKeyWithChecksum.key] = jarKey
-                        }
-                    }
                 }
 
                 if (resolvedIsNew) {
@@ -802,19 +670,6 @@ internal class KefsStorage(
             }
 
             statusPublisher.redraw()
-
-            if (resolvedVersion != null) {
-                val watchKey = withContext(Dispatchers.IO) {
-                    destination.registerSafe(
-                        StandardWatchEventKinds.ENTRY_MODIFY,
-                        StandardWatchEventKinds.ENTRY_DELETE,
-                    )
-                } ?: return@launch
-
-                val pluginWatchKey = FileWatcherPluginKey(descriptor.name, plugin.requestedVersion, resolvedVersion)
-                pluginWatchKeys[pluginWatchKey] = watchKey
-                pluginWatchKeysReverse[watchKey] = pluginWatchKey
-            }
         }
 
         scope.launch(CoroutineName("actualize-plugins-job-starter-${descriptor.name}")) {
@@ -969,48 +824,9 @@ internal class KefsStorage(
             val distinct = paths.distinctBy { it.resolvedVersion }
             if (paths.any { it.jar == null || it.resolvedVersion == null } || distinct.size != 1) {
                 logger.debug("Some versions are missing for ${requested.descriptor.name} (${requested.requestedVersion})")
-
-                val prevResolvedVersion = pluginMap.entries.firstNotNullOfOrNull {
-                    if (it.key.requestedVersion == requested.requestedVersion) {
-                        (it.value as? ArtifactState.Cached)?.resolvedVersion
-                    } else {
-                        null
-                    }
-                }
-
-                scope.actualize(requested, prevResolvedVersion)
+                scope.actualize(requested)
 
                 return@launch
-            }
-
-            val resolvedVersion = distinct.first().resolvedVersion ?: run {
-                logger.error("Unexpected null resolved version for ${requested.descriptor.name} (${requested.requestedVersion}): $paths")
-                return@launch
-            }
-
-            val pluginWatchKey = FileWatcherPluginKey(
-                pluginName = requested.descriptor.name,
-                requestedVersion = requested.requestedVersion,
-                resolvedVersion = resolvedVersion,
-            )
-
-            val new = withContext(Dispatchers.IO) {
-                val newPath = cacheDirectory(
-                    kotlinIdeVersion = kotlinIdeVersion,
-                    pluginName = requested.descriptor.name,
-                    requestedVersion = requested.requestedVersion,
-                )
-
-                pluginWatchKeys.compute(pluginWatchKey) { _, old ->
-                    old ?: newPath?.registerSafe(
-                        StandardWatchEventKinds.ENTRY_MODIFY,
-                        StandardWatchEventKinds.ENTRY_DELETE,
-                    )
-                }
-            }
-
-            if (new != null) {
-                pluginWatchKeysReverse[new] = pluginWatchKey
             }
 
             invalidateKotlinPluginCache()
@@ -1085,28 +901,6 @@ internal class KefsStorage(
                 resolvedVersion = null,
                 jar = null,
             )
-        }
-
-        val jarId = JarId(
-            pluginName = requested.descriptor.name,
-            mavenId = requested.artifact.id,
-            requestedVersion = requested.requestedVersion,
-            resolvedVersion = resolvedVersion,
-        )
-
-        val watchKeyWithChecksum = originalWatchKeys.compute(jarId) { _, old ->
-            if (old?.checksum != checksum) {
-                old?.key?.cancel()
-
-                original?.parent?.registerSafe(
-                    StandardWatchEventKinds.ENTRY_MODIFY,
-                    StandardWatchEventKinds.ENTRY_CREATE,
-                )?.let { WatchKeyWithChecksum(it, checksum) }
-            } else old
-        }
-
-        if (watchKeyWithChecksum != null) {
-            originalWatchKeysReverse[watchKeyWithChecksum.key] = jarId
         }
 
         val kotlinVersionMismatch = if (resolvedKotlinVersion != kotlinIdeVersion) {
@@ -1315,15 +1109,6 @@ internal class KefsStorage(
             logger.debug("Invalidated KotlinCompilerPluginsProvider after debounce")
         } else {
             logger.warn("Failed to invalidate the KotlinCompilerPluginsProvider")
-        }
-    }
-
-    private fun Watchable.registerSafe(vararg events: WatchEvent.Kind<*>): WatchKey? {
-        return try {
-            register(watchService, *events)
-        } catch (e: Exception) {
-            logger.warn("Failed to register watch key for $this", e)
-            null
         }
     }
 

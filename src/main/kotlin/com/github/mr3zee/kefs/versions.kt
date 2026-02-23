@@ -101,34 +101,6 @@ internal class PartialJarId(
     }
 }
 
-internal class FileWatcherPluginKey(
-    val pluginName: String,
-    val requestedVersion: RequestedVersion,
-    val resolvedVersion: ResolvedVersion,
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as FileWatcherPluginKey
-
-        if (pluginName != other.pluginName) return false
-        if (requestedVersion != other.requestedVersion) return false
-
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = pluginName.hashCode()
-        result = 31 * result + requestedVersion.hashCode()
-        return result
-    }
-
-    override fun toString(): String {
-        return "$pluginName|$requestedVersion|$resolvedVersion"
-    }
-}
-
 internal class StoredJar(
     val mavenId: String,
     val resolvedVersion: ResolvedVersion?,
