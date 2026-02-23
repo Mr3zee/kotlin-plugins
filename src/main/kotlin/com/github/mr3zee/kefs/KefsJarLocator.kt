@@ -344,7 +344,7 @@ internal object KefsJarLocator {
         }
     }
 
-    private fun accumulate(
+    internal fun accumulate(
         failedToFetch: List<LocatorResult.FailedToFetch>,
         notFound: List<LocatorResult.NotFound>,
         cached: LocatorResult.Cached?,

@@ -95,9 +95,9 @@ internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
     }
 }
 
-private val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
+internal val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
 
-private val IGNORE_LIST = listOf(
+internal val IGNORE_LIST = listOf(
     "org.jetbrains.kotlin/kotlin-scripting-jvm/",
     "org.jetbrains.kotlin/kotlin-scripting-common/",
     "org.jetbrains.kotlin/kotlin-stdlib/",

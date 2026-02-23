@@ -16,8 +16,6 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
 import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.createFile
@@ -396,16 +394,7 @@ internal class KefsExceptionReporterImpl(
         val storage = project.service<KefsStorage>()
         val reportsDir = storage.reportsDir() ?: return@runCatchingExceptCancellation null
 
-        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH-mm-ss")
-            .withZone(ZoneId.systemDefault())
-
-        val nowFormatted = formatter.format(Instant.now())
-
-        val reportFilename = "${report.pluginName}-${report.mavenId}-${nowFormatted}"
-            .replace(":", "-")
-            .replace(".", "-")
-            .plus(".txt")
-
+        val reportFilename = formatReportFilename(report.pluginName, report.mavenId, Instant.now())
         val reportFile = reportsDir.resolve(reportFilename)
 
         withContext(Dispatchers.IO) {
@@ -413,22 +402,8 @@ internal class KefsExceptionReporterImpl(
                 reportFile.createFile()
             }
 
-            reportFile.writeText(
-                """
-KEFS Report for ${report.pluginName} (${report.mavenId})
-
-Kotlin IDE version: ${service<KotlinVersionService>().getKotlinIdePluginVersion()}
-Kotlin version mismatch: ${report.kotlinVersionMismatch ?: "none"}
-Requested version: ${report.requestedVersion}
-Resolved version: ${report.resolvedVersion}
-Origin repository: ${report.origin.value}
-Checksum: ${report.checksum}
-Is probably incompatible: ${report.isProbablyIncompatible}
-
-Exceptions:
-${report.exceptions.joinToString("$NL$NL") { it.stackTraceToString() }}
-            """.trimIndent()
-            )
+            val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+            reportFile.writeText(formatExceptionReport(report, kotlinIdeVersion))
         }
 
         reportFile
@@ -439,12 +414,6 @@ ${report.exceptions.joinToString("$NL$NL") { it.stackTraceToString() }}
             logger.error("Failed to create report file", it.exceptionOrNull())
             null
         }
-    }
-
-    private fun Throwable.distinctStacktrace(lookup: Set<String>): String {
-        return stackTrace.filter { it.className in lookup }.joinToString("|") { it.toString() } +
-                "|" +
-                cause?.distinctStacktrace(lookup).orEmpty()
     }
 
     private inner class DiscoveryHandler : KotlinPluginDiscoveryUpdater {

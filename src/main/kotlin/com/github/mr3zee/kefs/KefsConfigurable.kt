@@ -1144,21 +1144,21 @@ private class PluginsDialog(
 
         if (useReplacementCheckbox.isSelected) {
             if (replacementVersionField.text.isNotEmpty()) {
-                validateReplacementPatternVersion(
+                validateReplacementPatternVersionUI(
                     replacementVersionField.text,
                     replacementVersionField,
                 )?.let { return it }
             }
 
             if (replacementDetectField.text.isNotEmpty()) {
-                validateReplacementPatternJar(
+                validateReplacementPatternJarUI(
                     replacementDetectField.text,
                     replacementDetectField,
                 )?.let { return it }
             }
 
             if (replacementSearchField.text.isNotEmpty()) {
-                validateReplacementPatternJar(
+                validateReplacementPatternJarUI(
                     replacementSearchField.text,
                     replacementSearchField,
                 )?.let { return it }
@@ -1217,21 +1217,21 @@ private class PluginsDialog(
 
     private fun showVersionReplacementExample(): Boolean {
         return useReplacementCheckbox.isSelected && (replacementVersionField.text.isEmpty() ||
-                validateReplacementPatternVersion(replacementVersionField.text, replacementVersionField) == null)
+                validateReplacementPatternVersion(replacementVersionField.text) == null)
     }
 
     private fun showDetectReplacementExample(): Boolean {
         return useReplacementCheckbox.isSelected && (replacementVersionField.text.isEmpty() ||
-                validateReplacementPatternVersion(replacementVersionField.text, replacementVersionField) == null) &&
+                validateReplacementPatternVersion(replacementVersionField.text) == null) &&
                 (replacementDetectField.text.isEmpty() ||
-                        validateReplacementPatternJar(replacementDetectField.text, replacementDetectField) == null)
+                        validateReplacementPatternJar(replacementDetectField.text) == null)
     }
 
     private fun showSearchReplacementExample(): Boolean {
         return useReplacementCheckbox.isSelected && (replacementVersionField.text.isEmpty() ||
-                validateReplacementPatternVersion(replacementVersionField.text, replacementVersionField) == null) &&
+                validateReplacementPatternVersion(replacementVersionField.text) == null) &&
                 (replacementSearchField.text.isEmpty() ||
-                        validateReplacementPatternJar(replacementSearchField.text, replacementSearchField) == null)
+                        validateReplacementPatternJar(replacementSearchField.text) == null)
     }
 
     private class VersionReplacementExamples(
@@ -1323,8 +1323,7 @@ private val placeholderReplacement = KotlinPluginDescriptor.Replacement(
     search = KotlinPluginDescriptor.Replacement.JarMacro.ARTIFACT_ID.macro,
 )
 
-internal val mavenRegex = "([\\w.]+):([\\w\\-]+)".toRegex()
-internal val pluginNameRegex = "[a-zA-Z0-9_-]+".toRegex()
+// mavenRegex, pluginNameRegex are in KefsValidation.kt
 
 internal object KefsConfigurableUtil {
     @Volatile
@@ -1341,136 +1340,21 @@ internal object KefsConfigurableUtil {
     }
 }
 
-internal fun validateReplacementPatternVersion(
+// Validation logic is in KefsValidation.kt
+// These wrappers convert the pure String? result to ValidationInfo? for the UI
+
+internal fun validateReplacementPatternVersionUI(
     pattern: String,
     component: JComponent? = null,
 ): ValidationInfo? {
-    return validateReplacementPattern(
-        pattern = pattern,
-        isVersion = true,
-        mustContain = listOf(
-            KotlinPluginDescriptor.Replacement.VersionMacro.KOTLIN_VERSION,
-            KotlinPluginDescriptor.Replacement.VersionMacro.LIB_VERSION,
-        ),
-        allAvailable = KotlinPluginDescriptor.Replacement.VersionMacro.entries,
-        component = component,
-    )
+    return validateReplacementPatternVersion(pattern)?.let { ValidationInfo(it, component) }
 }
 
-internal fun validateReplacementPatternJar(
+internal fun validateReplacementPatternJarUI(
     pattern: String,
     component: JComponent? = null,
 ): ValidationInfo? {
-    return validateReplacementPattern(
-        pattern = pattern,
-        isVersion = false,
-        mustContain = listOf(KotlinPluginDescriptor.Replacement.JarMacro.ARTIFACT_ID),
-        allAvailable = KotlinPluginDescriptor.Replacement.JarMacro.entries,
-        component = component,
-    )
-}
-
-internal fun validateReplacementPattern(
-    pattern: String,
-    isVersion: Boolean,
-    mustContain: List<KotlinPluginDescriptor.Replacement.Marco>,
-    allAvailable: List<KotlinPluginDescriptor.Replacement.Marco>,
-    component: JComponent? = null,
-): ValidationInfo? {
-    if (pattern.isBlank()) {
-        return ValidationInfo(KefsBundle.message("validation.replacement.empty"), component)
-    }
-
-    if (mustContain.any { !pattern.contains(it.macro) }) {
-        return ValidationInfo(
-            KefsBundle.message(
-                "validation.replacement.must.contain.macros",
-                mustContain.joinToString(", ") { it.macro }.sanitizeAngleBracketsForHtml(),
-            ),
-            component,
-        )
-    }
-
-    if (!isVersion && pattern.contains(".jar")) {
-        return ValidationInfo(KefsBundle.message("validation.replacement.jar.extension"), component)
-    }
-
-    var i = 0
-    var invalidMacro = false
-    val allAvailableMacros = allAvailable.map { it.macro }
-    while (i < pattern.length) {
-        val c = pattern[i]
-
-        if (c != '<' && c != '>') {
-            i++
-            continue
-        }
-
-        val macro = when (c) {
-            '<' -> {
-                val start = i
-                var next = c
-
-                while (next != '>') {
-                    if (++i >= pattern.length) {
-                        invalidMacro = true
-                        break
-                    }
-
-                    next = pattern[i]
-                }
-
-                pattern.substring(start, (++i).coerceAtMost(pattern.length))
-            }
-
-            '>' -> {
-                invalidMacro = true
-                break
-            }
-
-            else -> continue
-        }
-
-        if (macro !in allAvailableMacros) {
-            invalidMacro = true
-            break
-        }
-    }
-
-    if (invalidMacro) {
-        return ValidationInfo(
-            KefsBundle.message(
-                "validation.replacement.invalid.angle.brackets",
-                "&lt;",
-                "&gt;",
-                allAvailable.joinToString(", ").sanitizeAngleBracketsForHtml(),
-            ),
-            component,
-        )
-    }
-
-    var noMacros = pattern
-    allAvailable.forEach {
-        noMacros = noMacros.replace(it.macro, "")
-    }
-
-    if (isVersion) {
-        if (noMacros.contains(replacementPatternVersionForbiddenCharactersRegex)) {
-            return ValidationInfo(
-                KefsBundle.message("validation.replacement.invalid.symbols.version"),
-                component,
-            )
-        }
-    } else {
-        if (noMacros.contains(replacementPatternForbiddenCharactersRegex)) {
-            return ValidationInfo(
-                KefsBundle.message("validation.replacement.invalid.symbols"),
-                component,
-            )
-        }
-    }
-
-    return null
+    return validateReplacementPatternJar(pattern)?.let { ValidationInfo(it, component) }
 }
 
 private inline fun <reified M> textFieldWithReplacementCompletion(
@@ -1507,11 +1391,4 @@ private fun TextFieldWithAutoCompletion<*>.onChange(action: () -> Unit) {
             action()
         }
     })
-}
-
-private val replacementPatternForbiddenCharactersRegex = "[^\\w-]".toRegex()
-private val replacementPatternVersionForbiddenCharactersRegex = "[^\\w.+-]".toRegex()
-
-private fun String.sanitizeAngleBracketsForHtml(): String {
-    return replace("<", "&lt;").replace(">", "&gt;")
 }

@@ -138,17 +138,17 @@ internal object KefsDefaultStateLoader {
 
                 val validateVersionPattern = validateReplacementPatternVersion(version)
                 if (validateVersionPattern != null) {
-                    error("Invalid replacement pattern replacement/version '$version': ${validateVersionPattern.message} for plugin $name")
+                    error("Invalid replacement pattern replacement/version '$version': $validateVersionPattern for plugin $name")
                 }
 
                 val validateDetectPattern = validateReplacementPatternJar(detect)
                 if (validateDetectPattern != null) {
-                    error("Invalid replacement pattern replacement/detect '$detect': ${validateDetectPattern.message} for plugin $name")
+                    error("Invalid replacement pattern replacement/detect '$detect': $validateDetectPattern for plugin $name")
                 }
 
                 val validateSearchPattern = validateReplacementPatternJar(search)
                 if (validateSearchPattern != null) {
-                    error("Invalid replacement pattern replacement/search '$search': ${validateSearchPattern.message} for plugin $name")
+                    error("Invalid replacement pattern replacement/search '$search': $validateSearchPattern for plugin $name")
                 }
 
                 KotlinPluginDescriptor.Replacement(version, detect, search)

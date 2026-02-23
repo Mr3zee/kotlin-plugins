@@ -205,14 +205,14 @@ internal class KefsExceptionAnalyzerService(
                 ?.reduce { acc, set -> acc.intersect(set) }
                 ?: match(lookup, exception.cause ?: return null)
         }
-
-        private fun Throwable.isProbablyIncompatible(): Boolean {
-            return this is ClassNotFoundException ||
-                    this is NoClassDefFoundError ||
-                    this is IncompatibleClassChangeError ||
-                    this is LinkageError ||
-                    this is ClassCastException ||
-                    this.cause?.isProbablyIncompatible() == true
-        }
     }
+}
+
+internal fun Throwable.isProbablyIncompatible(): Boolean {
+    return this is ClassNotFoundException ||
+            this is NoClassDefFoundError ||
+            this is IncompatibleClassChangeError ||
+            this is LinkageError ||
+            this is ClassCastException ||
+            this.cause?.isProbablyIncompatible() == true
 }
