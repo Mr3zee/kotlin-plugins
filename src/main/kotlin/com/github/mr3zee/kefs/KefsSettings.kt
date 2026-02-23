@@ -14,7 +14,7 @@ import kotlin.collections.distinctBy
 
 @Service(Service.Level.PROJECT)
 @State(
-    name = "KefsSettings",
+    name = "KotlinPluginsSettings",
     storages = [
         Storage("kotlin-plugins.xml"),
     ],
