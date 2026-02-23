@@ -75,7 +75,6 @@ repositories {
         defaultRepositories() // https://www.jetbrains.com/intellij-repository/releases, search com.jetbrains.intellij.idea
         jetbrainsRuntime()
         snapshots() // https://www.jetbrains.com/intellij-repository/snapshots
-        nightly()
     }
 }
 

@@ -102,7 +102,7 @@ When adding support for a new IDE major (e.g., `262`):
    ide.262.kotlinLang = <kotlin-version>
    ide.262.serializationVersion = <serialization-version>
    ```
-   **Finding the platform version:** Browse the IntelliJ releases Maven repository index at `https://www.jetbrains.com/intellij-repository/releases/com/jetbrains/intellij/idea/ideaIU/maven-metadata.xml` (follows redirects) and pick the latest `<major>.xxxxx.xx` build. For EAP/snapshot versions, use `<major>-EAP-SNAPSHOT`.
+   **Finding the platform version:** Browse the IntelliJ releases Maven repository index at `https://www.jetbrains.com/intellij-repository/releases/com/jetbrains/intellij/idea/ideaIU/maven-metadata.xml` (follows redirects) and pick the latest `<major>.xxxxx.xx` build. For EAP versions, browse the snapshots repo at `https://www.jetbrains.com/intellij-repository/snapshots/com/jetbrains/intellij/idea/ideaIU/maven-metadata.xml` and pick a specific `<major>.xxxxx.xx-EAP-CANDIDATE` build (avoid `-EAP-SNAPSHOT` — it resolves to nightly builds that rotate and can break CI).
 
 2. **`src/<major>/kotlin/.../VersionSpecificApiImpl.kt`** — create a new version-specific source directory implementing `VersionSpecificApi`. Copy from the nearest existing version and adapt to any API changes.
 
