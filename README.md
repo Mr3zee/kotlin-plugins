@@ -1,6 +1,6 @@
 # Kotlin External FIR Support
 
-![Build](https://github.com/Mr3zee/kotlin-plugins/workflows/Build/badge.svg)
+![Build](https://github.com/Mr3zee/kotlin-external-fir-support/workflows/Build/badge.svg)
 [![Version](https://img.shields.io/jetbrains/plugin/v/26480-kotlin-external-fir-support.svg)](https://plugins.jetbrains.com/plugin/26480-kotlin-external-fir-support)
 [![Downloads](https://img.shields.io/jetbrains/plugin/d/26480-kotlin-external-fir-support.svg)](https://plugins.jetbrains.com/plugin/26480-kotlin-external-fir-support)
 
@@ -17,9 +17,9 @@ Run Kotlin compiler plugins in the IDE.
 
 ## Guides
 
-Check out our advanced usage guide: [GUIDE.md](https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md)
+Check out our advanced usage guide: [GUIDE.md](https://github.com/Mr3zee/kotlin-external-fir-support/blob/main/GUIDE.md)
 
-If you are a compiler plugin developer, check out our [plugin development guide](https://github.com/Mr3zee/kotlin-plugins/blob/main/PLUGIN_AUTHORS.md).
+If you are a compiler plugin developer, check out our [plugin development guide](https://github.com/Mr3zee/kotlin-external-fir-support/blob/main/PLUGIN_AUTHORS.md).
 
 ## Use Any Kotlin Compiler Plugin Inside IDE
 
@@ -102,7 +102,7 @@ Quickly manage the plugin's state from the `Find Action` (Ctrl/Cmd+Shift+A) menu
 
 ## Support
 
-If you encounter any issues, [report](https://github.com/Mr3zee/kotlin-plugins/issues) them on GitHub.
+If you encounter any issues, [report](https://github.com/Mr3zee/kotlin-external-fir-support/issues) them on GitHub.
 
 If any exceptions are thrown, you can use the built-in <kbd>Report to the 3rd Party</kbd> action to send a bug report to us.
 
@@ -124,7 +124,7 @@ If any exceptions are thrown, you can use the built-in <kbd>Report to the 3rd Pa
 
 - Manually:
 
-  Download the [latest release](https://github.com/Mr3zee/kotlin-plugins/releases/latest) and install it manually using
+  Download the [latest release](https://github.com/Mr3zee/kotlin-external-fir-support/releases/latest) and install it manually using
   <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>⚙️</kbd> > <kbd>Install plugin from disk...</kbd>
 
 

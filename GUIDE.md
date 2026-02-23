@@ -402,7 +402,7 @@ java.lang.ClassNotFoundException: <ClassName of one of the plugins KEFS detected
 
 ### Still Having Issues?
 
-If none of the above solutions work, or if the issue is annoying or reproducible, please [report an issue](https://github.com/Mr3zee/kotlin-plugins/issues) on our GitHub repository. When reporting, please include:
+If none of the above solutions work, or if the issue is annoying or reproducible, please [report an issue](https://github.com/Mr3zee/kotlin-external-fir-support/issues) on our GitHub repository. When reporting, please include:
 
 - Your IDE version and Kotlin plugin version (shown in <kbd>Tools</kbd> > <kbd>Kotlin External FIR Support</kbd> settings)
 - The full error message or stack trace (if any)

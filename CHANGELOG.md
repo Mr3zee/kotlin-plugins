@@ -19,8 +19,8 @@
 
 ### Added
 
-- Onboarding guide: https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md
-- For compiler plugin developers guide: https://github.com/Mr3zee/kotlin-plugins/blob/main/PLUGIN_AUTHORS.md
+- Onboarding guide: https://github.com/Mr3zee/kotlin-external-fir-support/blob/main/GUIDE.md
+- For compiler plugin developers guide: https://github.com/Mr3zee/kotlin-external-fir-support/blob/main/PLUGIN_AUTHORS.md
 - **Plugin Replacement Engine:** Added the core mechanism to intercept Kotlin compiler plugin requests within the
   IDE. This allows KEFS to replace a project's plugin version (e.g. built for Kotlin `2.2.20`) with a
   version compatible with the IDE's internal compiler (e.g., `2.2.0-ij251-78`).
@@ -127,10 +127,10 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/kotlin-plugins/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/Mr3zee/kotlin-plugins/compare/v0.1.2...v0.2.0
-[0.1.2]: https://github.com/Mr3zee/kotlin-plugins/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/Mr3zee/kotlin-plugins/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/Mr3zee/kotlin-plugins/compare/v0.0.2...v0.1.0
-[0.0.2]: https://github.com/Mr3zee/kotlin-plugins/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/Mr3zee/kotlin-plugins/commits/v0.0.1
+[Unreleased]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.0.2...v0.1.0
+[0.0.2]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/Mr3zee/kotlin-external-fir-support/commits/v0.0.1

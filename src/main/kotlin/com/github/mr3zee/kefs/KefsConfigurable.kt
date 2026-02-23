@@ -310,7 +310,7 @@ internal class KefsConfigurable(private val project: Project) : Configurable {
                             null,
                             KefsBundle.message("settings.enableAnalyzer.contextHelp.description"),
                             KefsBundle.message("settings.enableAnalyzer.contextHelp.linkText"),
-                            URI("https://github.com/Mr3zee/kotlin-plugins/blob/main/PLUGIN_AUTHORS.md").toURL(),
+                            URI("https://github.com/Mr3zee/kotlin-external-fir-support/blob/main/PLUGIN_AUTHORS.md").toURL(),
                         )
                     )
                 }
@@ -968,7 +968,7 @@ private class PluginsDialog(
                         null,
                         KefsBundle.message("settings.add.plugin.version.matching.help"),
                         KefsBundle.message("settings.add.plugin.version.matching.help.link"),
-                        URI("https://github.com/Mr3zee/kotlin-plugins/blob/main/GUIDE.md#version-matching").toURL(),
+                        URI("https://github.com/Mr3zee/kotlin-external-fir-support/blob/main/GUIDE.md#version-matching").toURL(),
                     )
                 )
             }
