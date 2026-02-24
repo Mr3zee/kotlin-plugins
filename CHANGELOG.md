@@ -6,10 +6,14 @@
 
 ### Added
 
+- Support for IDE versions 251, 252, 253, and 261
 - `KEFS: Copy Kotlin IDE Version` action — copies the IDE's internal Kotlin compiler version to the clipboard
+- `KEFS: Toggle Extended Debounce` troubleshooting action — extends the cache invalidation debounce interval to work around analysis re-trigger issues
 
 ### Changed
 
+- Improved file watching: monitors local repository directory trees recursively, automatically detecting new subdirectories and artifacts
+- Cache directory file watching now suppresses notifications during plugin self-updates, reducing unnecessary re-actualization
 - Renamed local disk cache directory from `$USER_HOME/.kotlinPlugins` to `$USER_HOME/.kefs`
 - Renamed action prefix from `Kotlin FIR External Support:` to `KEFS:`
 - Renamed settings page from `Tools > Kotlin Plugins` to `Tools > Kotlin External FIR Support`
