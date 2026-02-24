@@ -1,11 +1,19 @@
 # GitHub Actions Workflow that dispatches release jobs for all IDE versions
-# Triggered when a release is published, this workflow reads the IDE version map
-# from gradle.properties and triggers the release workflow for each version + the open-ended (latest) release
+# Triggered when a release is published, or manually via workflow_dispatch.
+# Reads the IDE version map from gradle.properties and triggers the release workflow
+# for each version + the open-ended (latest) release.
 
 name: Release Dispatcher
 on:
   release:
     types: [prereleased, released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (leave empty to use the latest release)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   dispatch:
@@ -16,12 +24,29 @@ jobs:
       pull-requests: write
     outputs:
       ide_versions: ${{ steps.versions.outputs.matrix }}
+      release_tag: ${{ steps.resolve-tag.outputs.tag }}
     steps:
       # Check out the current repository
       - name: Fetch Sources
         uses: actions/checkout@v6
         with:
           ref: release/latest
+
+      # Resolve the release tag — use input, event, or latest release
+      - name: Resolve Release Tag
+        id: resolve-tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG=$(gh release view --json tagName -q '.tagName')
+          fi
+          echo "Resolved release tag: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       # Set up the Java environment for changelog updates
       - name: Setup Java
@@ -34,25 +59,39 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      # Update the Unreleased section with the current release note (once for all releases)
-      - name: Patch Changelog
-        if: github.event.release.body != ''
-        env:
-          CHANGELOG: ${{ github.event.release.body }}
-        run: |
-          RELEASE_NOTE="./build/tmp/release_note.txt"
-          mkdir -p "$(dirname "$RELEASE_NOTE")"
-          echo "$CHANGELOG" > $RELEASE_NOTE
-
-          ./gradlew patchChangelog --release-note-file=$RELEASE_NOTE
-
-      # Create a pull request with changelog updates
-      - name: Create Pull Request
-        if: github.event.release.body != ''
+      # Fetch the release body for changelog patching
+      - name: Fetch Release Body
+        id: release-body
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
+          TAG="${{ steps.resolve-tag.outputs.tag }}"
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            BODY="${{ github.event.release.body }}"
+          else
+            BODY=$(gh release view "$TAG" --json body -q '.body')
+          fi
+          if [[ -n "$BODY" ]]; then
+            echo "has_body=true" >> $GITHUB_OUTPUT
+            RELEASE_NOTE="./build/tmp/release_note.txt"
+            mkdir -p "$(dirname "$RELEASE_NOTE")"
+            echo "$BODY" > "$RELEASE_NOTE"
+          else
+            echo "has_body=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Update the Unreleased section with the current release note (once for all releases)
+      - name: Patch Changelog
+        if: steps.release-body.outputs.has_body == 'true'
+        run: ./gradlew patchChangelog --release-note-file=./build/tmp/release_note.txt
+
+      # Create a pull request with changelog updates
+      - name: Create Pull Request
+        if: steps.release-body.outputs.has_body == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.resolve-tag.outputs.tag }}"
           BRANCH="changelog-update-$VERSION"
           LABEL="release changelog"
 
@@ -90,7 +129,7 @@ jobs:
       contents: write
     uses: ./.github/workflows/release.yml
     with:
-      tag: ${{ github.event.release.tag_name }}
+      tag: ${{ needs.dispatch.outputs.release_tag }}
     secrets: inherit
 
   # Release for each IDE-specific version
@@ -107,5 +146,5 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       ide_version_major: ${{ matrix.ide_version }}
-      tag: ${{ github.event.release.tag_name }}
+      tag: ${{ needs.dispatch.outputs.release_tag }}
     secrets: inherit
