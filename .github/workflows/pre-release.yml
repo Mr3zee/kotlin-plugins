@@ -139,7 +139,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(grep -oP '^pluginVersion\s*=\s*\K.*' gradle.properties | xargs)
+          VERSION=$(sed -n 's/^pluginVersion *= *//p' gradle.properties | xargs)
           RELEASE_NOTE="./build/tmp/release_note.txt"
           ./gradlew getChangelog --unreleased --no-header --quiet --console=plain --output-file=$RELEASE_NOTE
 

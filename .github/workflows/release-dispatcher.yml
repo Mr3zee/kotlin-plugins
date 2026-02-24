@@ -17,7 +17,8 @@ on:
 
 jobs:
   dispatch:
-    name: Dispatch Release Jobs
+    name: Prepare release & resolve IDE versions
+    if: github.ref == 'refs/heads/release/latest'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,14 +81,29 @@ jobs:
             echo "has_body=false" >> $GITHUB_OUTPUT
           fi
 
+      # Check if changelog PR branch already exists (skip if re-running)
+      - name: Check Changelog Branch
+        id: changelog-check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.resolve-tag.outputs.tag }}"
+          BRANCH="changelog-update-$VERSION"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "Branch $BRANCH already exists, skipping changelog update"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       # Update the Unreleased section with the current release note (once for all releases)
       - name: Patch Changelog
-        if: steps.release-body.outputs.has_body == 'true'
+        if: steps.release-body.outputs.has_body == 'true' && steps.changelog-check.outputs.skip != 'true'
         run: ./gradlew patchChangelog --release-note-file=./build/tmp/release_note.txt
 
       # Create a pull request with changelog updates
       - name: Create Pull Request
-        if: steps.release-body.outputs.has_body == 'true'
+        if: steps.release-body.outputs.has_body == 'true' && steps.changelog-check.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -132,7 +148,7 @@ jobs:
       matrix:
         ide_version: ${{ fromJson(needs.dispatch.outputs.ide_versions) }}
       fail-fast: false
-    uses: ./.github/workflows/release.yml
+    uses: ./.github/workflows/publish-ide-version.yml
     with:
       ide_version_major: ${{ matrix.ide_version }}
       tag: ${{ needs.dispatch.outputs.release_tag }}
