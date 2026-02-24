@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-24
+
 ### Added
 
 - Support for IDE versions 251, 252, 253, and 261
@@ -131,10 +133,11 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.1.2...v0.2.0
-[0.1.2]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.0.2...v0.1.0
-[0.0.2]: https://github.com/Mr3zee/kotlin-external-fir-support/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/Mr3zee/kotlin-external-fir-support/commits/v0.0.1
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.0.2...v0.1.0
+[0.0.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/commits/v0.0.1
