@@ -86,6 +86,8 @@ jobs:
   release-latest:
     name: Release (latest)
     needs: dispatch
+    permissions:
+      contents: write
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ github.event.release.tag_name }}
@@ -96,6 +98,8 @@ jobs:
     name: Release (IDE ${{ matrix.ide_version }})
     needs: dispatch
     if: needs.dispatch.outputs.ide_versions != '[]'
+    permissions:
+      contents: write
     strategy:
       matrix:
         ide_version: ${{ fromJson(needs.dispatch.outputs.ide_versions) }}
