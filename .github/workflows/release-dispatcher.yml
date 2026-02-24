@@ -121,19 +121,8 @@ jobs:
           echo "IDE versions: $VERSIONS"
           echo "matrix=$VERSIONS" >> $GITHUB_OUTPUT
 
-  # Release for the open-ended (latest) version — no IDE version major set
-  release-latest:
-    name: Release (latest)
-    needs: dispatch
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release.yml
-    with:
-      tag: ${{ needs.dispatch.outputs.release_tag }}
-    secrets: inherit
-
   # Release for each IDE-specific version
-  release-ide:
+  release:
     name: Release (IDE ${{ matrix.ide_version }})
     needs: dispatch
     if: needs.dispatch.outputs.ide_versions != '[]'
