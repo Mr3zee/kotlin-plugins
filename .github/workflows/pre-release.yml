@@ -66,14 +66,14 @@ jobs:
 
       - name: Collect Tests Result
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tests-result-${{ matrix.ide_version }}
           path: ${{ github.workspace }}/build/reports/tests
 
       - name: Collect Plugin Verifier Result
         if: ${{ always() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pluginVerifier-result-${{ matrix.ide_version }}
           path: ${{ github.workspace }}/build/reports/pluginVerifier
